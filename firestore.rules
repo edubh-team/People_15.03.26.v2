@@ -1,0 +1,809 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function getUserData(uid) {
+      let path = /databases/$(database)/documents/users/$(uid);
+      return exists(path) ? get(path) : null;
+    }
+    function isSuperAdmin() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && u.data.orgRole == 'SUPER_ADMIN';
+    }
+    function isAdmin() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.role == 'admin' ||
+        u.data.role == 'ADMIN' ||
+        u.data.orgRole == 'SUPER_ADMIN' ||
+        u.data.orgRole == 'ADMIN' ||
+        u.data.orgRole == 'admin'
+      );
+    }
+    function isManager() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.orgRole in [
+          'MANAGER',
+          'SENIOR_MANAGER',
+          'GM',
+          'AVP',
+          'VP',
+          'SALES_HEAD',
+          'CBO',
+          'CEO',
+          'manager',
+          'senior_manager',
+          'gm',
+          'avp',
+          'vp',
+          'sales_head',
+          'cbo',
+          'ceo',
+          'Manager'
+        ] ||
+        u.data.role in [
+          'MANAGER',
+          'SENIOR_MANAGER',
+          'GM',
+          'AVP',
+          'VP',
+          'SALES_HEAD',
+          'CBO',
+          'CEO',
+          'manager',
+          'senior_manager',
+          'gm',
+          'avp',
+          'vp',
+          'sales_head',
+          'cbo',
+          'ceo',
+          'Manager'
+        ]
+      );
+    }
+    function isManagerOrAbove() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.orgRole in [
+          'MANAGER',
+          'SENIOR_MANAGER',
+          'GM',
+          'AVP',
+          'VP',
+          'SALES_HEAD',
+          'CBO',
+          'CEO',
+          'manager',
+          'senior_manager',
+          'gm',
+          'avp',
+          'vp',
+          'sales_head',
+          'cbo',
+          'ceo'
+        ] ||
+        u.data.role in [
+          'MANAGER',
+          'SENIOR_MANAGER',
+          'GM',
+          'AVP',
+          'VP',
+          'SALES_HEAD',
+          'CBO',
+          'CEO',
+          'manager',
+          'senior_manager',
+          'gm',
+          'avp',
+          'vp',
+          'sales_head',
+          'cbo',
+          'ceo'
+        ]
+      );
+    }
+    function isTeamLead() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.role == 'teamLead' ||
+        u.data.role == 'TEAM_LEAD' ||
+        u.data.orgRole == 'TEAM_LEAD' ||
+        u.data.orgRole == 'team_lead' ||
+        u.data.role == 'TeamLead' ||
+        u.data.orgRole == 'TeamLead' ||
+        u.data.role == 'Team Lead' ||
+        u.data.orgRole == 'Team Lead'
+      );
+    }
+    function isHR() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.role == 'HR' ||
+        u.data.orgRole == 'HR' ||
+        u.data.role == 'hr' ||
+        u.data.orgRole == 'hr'
+      );
+    }
+    function isFinancer() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.orgRole == 'FINANCER' ||
+        u.data.role == 'FINANCER' ||
+        u.data.orgRole == 'financer' ||
+        u.data.role == 'financer' ||
+        u.data.orgRole == 'Financer' ||
+        u.data.role == 'Financer'
+      );
+    }
+    function isBDA() {
+      let u = getUserData(request.auth.uid);
+      return request.auth != null && u != null && (
+        u.data.orgRole == 'BDA' ||
+        u.data.role == 'BDA' ||
+        u.data.orgRole == 'bda' ||
+        u.data.role == 'bda'
+      );
+    }
+    function reportsTo(uid) {
+      let userPath = /databases/$(database)/documents/users/$(uid);
+      let targetExists = request.auth != null && uid != null && exists(userPath);
+      let target = targetExists ? get(userPath).data : null;
+      let targetReportsTo = target != null ? target.get("reportsTo", null) : null;
+      let parentPath = /databases/$(database)/documents/users/$(targetReportsTo);
+      let parentExists = targetReportsTo != null && exists(parentPath);
+      let parent = parentExists ? get(parentPath).data : null;
+
+      return request.auth != null &&
+        uid != null &&
+        targetExists &&
+        (
+          target.get("reportsTo", null) == request.auth.uid ||
+          target.get("teamLeadId", null) == request.auth.uid ||
+          target.get("managerId", null) == request.auth.uid ||
+          (
+            targetReportsTo != null &&
+            parentExists &&
+            parent.get("reportsTo", null) == request.auth.uid
+          )
+        );
+    }
+
+    function isLeadAssignmentMutation() {
+      return request.resource.data.assignedTo != resource.data.assignedTo ||
+        request.resource.data.ownerUid != resource.data.ownerUid;
+    }
+
+    function canMutateLeadAssignment() {
+      return isSuperAdmin() || isAdmin() || isManagerOrAbove();
+    }
+
+    function isSelfOrNull(uid) {
+      return uid == null || (request.auth != null && uid == request.auth.uid);
+    }
+
+    function hasConsistentRequestedLeadOwner() {
+      return request.resource.data.assignedTo == request.resource.data.ownerUid;
+    }
+
+    function canAssignRequestedLeadOwnerInScope() {
+      let requestedOwnerUid = request.resource.data.ownerUid;
+      return requestedOwnerUid == null ||
+        (request.auth != null && requestedOwnerUid == request.auth.uid) ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        (isManagerOrAbove() && (
+          requestedOwnerUid == request.auth.uid ||
+          reportsTo(requestedOwnerUid)
+        ));
+    }
+
+    function canCreateLeadWithRequestedOwnership() {
+      return request.auth != null &&
+        hasConsistentRequestedLeadOwner() &&
+        canAssignRequestedLeadOwnerInScope() &&
+        (
+          canMutateLeadAssignment() ||
+          (
+            isSelfOrNull(request.resource.data.assignedTo) &&
+            isSelfOrNull(request.resource.data.ownerUid)
+          )
+        );
+    }
+
+    function canReadPerformanceFor(uid) {
+      return request.auth != null && (
+        request.auth.uid == uid ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        (isManagerOrAbove() && reportsTo(uid))
+      );
+    }
+
+    function canReviewPerformanceFor(uid) {
+      return request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        (isManagerOrAbove() && reportsTo(uid))
+      );
+    }
+
+    match /leads/{leadId} {
+      allow read: if isSuperAdmin() || 
+                  (request.auth != null && (
+                    resource.data.assignedTo == request.auth.uid || 
+                    resource.data.ownerUid == request.auth.uid ||
+                    reportsTo(resource.data.assignedTo)
+                  ));
+      allow create: if canCreateLeadWithRequestedOwnership();
+      allow update: if resource != null && (isSuperAdmin() || 
+                    (request.auth != null && (
+                        resource.data.assignedTo == request.auth.uid || 
+                        resource.data.ownerUid == request.auth.uid || 
+                        reportsTo(resource.data.assignedTo)
+                    ) && (
+                      !isLeadAssignmentMutation() || canMutateLeadAssignment()
+                    )));
+    }
+
+    match /key_registry/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{userId} {
+      // Allow ANY logged-in user to read user profiles (Needed for Directory/ReportsTo)
+      allow read: if request.auth != null;
+      
+      // Secure sub-collection for private keys - ONLY owner can access
+      match /private_data/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Only Super Admins, Admins, and HR can update any profile.
+      // Managers and Team Leads can update their subordinates.
+      // Users can update their own profile ONLY if onboarding is not completed.
+      allow update: if isSuperAdmin() || isAdmin() || isHR() ||
+                    ((isManager() || isTeamLead()) && reportsTo(userId)) || 
+                    (request.auth.uid == userId);
+      
+      // Only Super Admin and HR can create/delete users
+      // Allow Managers to create users (UI will restrict role assignment)
+      allow create: if isSuperAdmin() || isManager() || isHR();
+      allow delete: if isSuperAdmin() || isHR();
+
+      match /achievements/{achievementId} {
+        allow read: if request.auth != null;
+        allow create, update: if isSuperAdmin() || isHR() || ((isManager() || isTeamLead()) && reportsTo(userId));
+      }
+
+      match /attendance/{allSubpaths=**} {
+        allow read: if request.auth != null && (
+          request.auth.uid == userId ||
+          isSuperAdmin() ||
+          isAdmin() ||
+          isManager() ||
+          isTeamLead() ||
+          isHR()
+        );
+        allow write: if request.auth != null && (
+          request.auth.uid == userId ||
+          isSuperAdmin() ||
+          isAdmin() ||
+          isHR() ||
+          (isManagerOrAbove() && reportsTo(userId))
+        );
+      }
+      
+      match /hidden_messages/{channelId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /security_keys/{document=**} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // HR Collections
+    match /candidates/{candidateId} {
+      allow read, write: if isSuperAdmin() || isHR();
+    }
+    
+    // Legacy snake_case collection (kept for safety)
+    match /leave_requests/{requestId} {
+      allow read: if request.auth != null; 
+      allow create: if request.auth != null; 
+      allow update, delete: if isSuperAdmin() || isHR() || (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
+    // Active camelCase collection used by application
+    match /leaveRequests/{requestId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isSuperAdmin() || 
+        isHR() || 
+        resource.data.uid == request.auth.uid ||
+        resource.data.assignedHR == request.auth.uid ||
+        ((isManager() || isTeamLead()) && reportsTo(resource.data.uid))
+      );
+    }
+
+    match /holidays/{holidayId} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin() || isHR();
+    }
+
+    match /leaveBalances/{uid} {
+      allow read: if request.auth != null && (
+        request.auth.uid == uid || 
+        isSuperAdmin() || 
+        isHR() || 
+        isManager() ||
+        isTeamLead()
+      );
+      // Allow users to initialize/reset their own balance (logic in attendance.ts)
+      allow write: if request.auth != null && (
+        request.auth.uid == uid || 
+        isSuperAdmin() || 
+        isHR()
+      );
+    }
+    
+    match /payroll/{payrollId} {
+      allow read: if isSuperAdmin() || isHR() || isFinancer() || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow write: if isSuperAdmin() || isHR() || isFinancer();
+      
+      match /ledger/{entryId} {
+        allow read, write: if isSuperAdmin() || isFinancer();
+      }
+    }
+
+    match /attendance/{attendanceId} {
+       allow read: if request.auth != null;
+       allow write: if request.auth != null && (request.auth.uid == resource.data.uid || request.auth.uid == resource.data.userId || isSuperAdmin() || isHR());
+    }
+
+    match /presence/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (request.auth.uid == uid || isSuperAdmin() || isHR());
+    }
+
+    match /reports/{reportId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        resource.data.userId == request.auth.uid ||
+        ((isTeamLead() || isManager()) && reportsTo(resource.data.userId)) ||
+        isManager() ||
+        isTeamLead()
+      );
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+    }
+
+    match /channels/{channelId} {
+      // Allow users to see channels they are participants of
+      allow read: if request.auth != null && (request.auth.uid in resource.data.participants || isSuperAdmin());
+      
+      // Allow creating channels if you are one of the participants
+      allow create: if request.auth != null && (request.auth.uid in request.resource.data.participants || isSuperAdmin());
+      
+      // Allow updating channels (e.g. new messages, read status) if participant
+      allow update: if request.auth != null && (request.auth.uid in resource.data.participants || isSuperAdmin());
+      
+      // Allow deleting channels if participant (users can delete chats they are part of)
+      allow delete: if request.auth != null && (request.auth.uid in resource.data.participants || isSuperAdmin());
+
+      match /messages/{messageId} {
+        // Messages are readable if user is in the parent channel's participants
+        allow read: if request.auth != null && (
+          (get(/databases/$(database)/documents/channels/$(channelId)) != null && 
+           request.auth.uid in get(/databases/$(database)/documents/channels/$(channelId)).data.participants) ||
+          isSuperAdmin()
+        );
+        
+        // Create message if participant and senderId matches auth
+        allow create: if request.auth != null && (
+          (get(/databases/$(database)/documents/channels/$(channelId)) != null &&
+           request.auth.uid in get(/databases/$(database)/documents/channels/$(channelId)).data.participants && 
+           request.resource.data.senderId == request.auth.uid) ||
+          isSuperAdmin()
+        );
+                      
+        // Update (e.g. mark deleted) only by sender
+        allow update: if request.auth != null && (resource.data.senderId == request.auth.uid || isSuperAdmin());
+      }
+
+      match /access_keys/{targetUid} {
+        // Users can read their own encrypted session keys
+        allow read: if request.auth != null && (request.auth.uid == targetUid || isSuperAdmin());
+        
+        // Allow writing keys (during group creation or rotation)
+        allow write: if request.auth != null;
+      }
+    }
+
+    match /activities/{activityId} {
+      // Allow managers to read all activities for analytics
+      allow read: if request.auth != null && (
+         isSuperAdmin() || 
+         isAdmin() ||
+         isManager()
+      );
+      allow create: if request.auth != null;
+    }
+
+    // Attendance collection access (used in dashboards)
+    match /attendance/{docId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove() ||
+        isTeamLead()
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+    }
+
+    match /attendance_override_audit/{auditId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove() ||
+        resource.data.uid == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      ) && request.resource.data.actor.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Audit Logs
+    match /auditLogs/{logId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create: if request.auth != null;
+    }
+
+    match /system_logs/{logId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create: if request.auth != null;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create: if request.auth != null;
+    }
+
+    match /presence/{uid} {
+      allow read, write: if isSuperAdmin();
+      
+      // Allow all authenticated users to read presence (needed for Team Directory)
+      allow read: if request.auth != null;
+      
+      // Keep strict write permissions
+      allow write: if request.auth != null && (request.auth.uid == uid || isSuperAdmin());
+    }
+
+    match /leads/{leadId} {
+      allow read, write: if isSuperAdmin();
+      allow read: if request.auth != null;
+      allow create: if canCreateLeadWithRequestedOwnership();
+      allow update: if resource != null && request.auth != null && (
+        request.auth.uid == resource.data.assignedTo ||
+        request.auth.uid == resource.data.ownerUid ||
+        isSuperAdmin() ||
+        ((isTeamLead() || isManagerOrAbove()) && (
+          reportsTo(resource.data.assignedTo) ||
+          reportsTo(resource.data.ownerUid) ||
+          (request.resource.data.assignedTo != null && reportsTo(request.resource.data.assignedTo)) ||
+          (request.resource.data.ownerUid != null && reportsTo(request.resource.data.ownerUid))
+        )) ||
+          (isManagerOrAbove() && resource.data.assignedTo == null && resource.data.ownerUid == null)
+      ) && (
+        !isLeadAssignmentMutation() || canMutateLeadAssignment()
+      );
+
+      match /timeline/{eventId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if false;
+      }
+
+      match /activities/{activityId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if false;
+      }
+
+      match /notes/{noteId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if false;
+      }
+
+      match /documents/{documentId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if false;
+      }
+    }
+
+    match /tasks/{taskId} {
+      // Allow managers to read tasks for analytics (e.g. active counts)
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.assignedTo == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid ||
+        ((isTeamLead() || isManager()) && (reportsTo(resource.data.assignedTo) || reportsTo(resource.data.createdBy)))
+      );
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.createdBy == request.auth.uid
+      );
+
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+      }
+    }
+
+
+
+    match /hike_requests/{requestId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && (
+        resource.data.recipientUid == request.auth.uid ||
+        isSuperAdmin()
+      );
+      allow update: if request.auth != null && (
+        resource.data.recipientUid == request.auth.uid ||
+        isSuperAdmin()
+      );
+      allow create: if request.auth != null;
+    }
+
+    match /crm_smart_views/{viewId} {
+      allow read: if request.auth != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        request.auth.uid in resource.data.sharedWithUserUids ||
+        isSuperAdmin() ||
+        isAdmin()
+      );
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if request.auth != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin()
+      );
+    }
+
+    match /communications/{messageId} {
+      allow read: if request.auth != null && (
+        resource.data.receiverId == request.auth.uid ||
+        resource.data.senderId == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin()
+      );
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        resource.data.receiverId == request.auth.uid ||
+        resource.data.senderId == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin()
+      );
+    }
+
+    match /settings/{settingId} {
+      // Legacy dashboard targets live here (e.g. settings/sales_targets).
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (isSuperAdmin() || isAdmin());
+    }
+
+    match /systemConfig/{configId} {
+      allow read: if request.auth != null && (isSuperAdmin() || isAdmin());
+      allow write: if request.auth != null && (isSuperAdmin() || isAdmin());
+    }
+
+    match /authLogs/{logId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create: if request.auth != null;
+    }
+
+    match /crm_bulk_actions/{batchId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isManager() ||
+        isTeamLead()
+      );
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isManager() ||
+        isTeamLead()
+      );
+
+      match /lead_changes/{changeId} {
+        allow read: if request.auth != null && (
+          isSuperAdmin() ||
+          isAdmin() ||
+          isManager() ||
+          isTeamLead()
+        );
+        allow create, update: if request.auth != null && (
+          isSuperAdmin() ||
+          isAdmin() ||
+          isManager() ||
+          isTeamLead()
+        );
+      }
+
+      match /lead_failures/{failureId} {
+        allow read: if request.auth != null && (
+          isSuperAdmin() ||
+          isAdmin() ||
+          isManager() ||
+          isTeamLead()
+        );
+        allow create, update: if request.auth != null && (
+          isSuperAdmin() ||
+          isAdmin() ||
+          isManager() ||
+          isTeamLead()
+        );
+      }
+    }
+
+    match /crm_import_batches/{batchId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isManagerOrAbove()
+      );
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isManagerOrAbove()
+      );
+    }
+
+    match /bda_pip_cases/{caseId} {
+      allow read: if request.auth != null && canReadPerformanceFor(resource.data.bdaUid);
+      allow create: if request.auth != null && (
+        canReviewPerformanceFor(request.resource.data.bdaUid)
+      );
+      allow update: if request.auth != null &&
+        request.resource.data.bdaUid == resource.data.bdaUid &&
+        canReviewPerformanceFor(resource.data.bdaUid);
+      allow delete: if false;
+    }
+
+    match /bda_counselling_entries/{entryId} {
+      allow read: if request.auth != null && canReadPerformanceFor(resource.data.bdaUid);
+      allow create: if request.auth != null && (
+        (isBDA() && request.resource.data.bdaUid == request.auth.uid) ||
+        canReviewPerformanceFor(request.resource.data.bdaUid)
+      );
+      allow update: if request.auth != null &&
+        request.resource.data.bdaUid == resource.data.bdaUid &&
+        canReviewPerformanceFor(resource.data.bdaUid);
+      allow delete: if false;
+    }
+
+    match /bda_emi_trackers/{uid} {
+      allow read: if request.auth != null && canReadPerformanceFor(uid);
+      allow create: if request.auth != null &&
+        request.resource.data.bdaUid == uid && (
+          (isBDA() && request.auth.uid == uid) ||
+          canReviewPerformanceFor(uid)
+        );
+      allow update: if request.auth != null &&
+        resource.data.bdaUid == uid &&
+        request.resource.data.bdaUid == resource.data.bdaUid && (
+          (isBDA() && request.auth.uid == uid) ||
+          canReviewPerformanceFor(uid)
+        );
+      allow delete: if false;
+    }
+
+    match /bda_trainee_qualification_audit/{auditId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+      allow create, update, delete: if false;
+    }
+
+    match /report_templates/{templateId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+    }
+
+    match /report_schedules/{scheduleId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+    }
+
+    // Finance Collections
+    match /finance_external_accounts/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin() || isFinancer();
+    }
+    match /finance_transactions/{docId} {
+      allow read, write: if isSuperAdmin() || isFinancer();
+    }
+    match /finance_stats/{docId} {
+      allow read, write: if isSuperAdmin() || isFinancer();
+    }
+    match /finance_daily_records/{docId} {
+      allow read, write: if isSuperAdmin() || isFinancer();
+    }
+    match /finance_approval_requests/{docId} {
+      allow read: if isSuperAdmin() || isFinancer();
+      allow create, update: if isSuperAdmin() || isFinancer();
+    }
+    match /finance_audit_events/{docId} {
+      allow read: if isSuperAdmin() || isFinancer();
+      allow create: if isSuperAdmin() || isFinancer();
+    }
+  }
+}

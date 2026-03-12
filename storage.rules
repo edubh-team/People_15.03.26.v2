@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Profile images:
+    // - Readable by any authenticated user (so colleagues can see avatars)
+    // - Writable only by the owner
+    // - Validated for size and type
+    match /profiles/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+                   && request.auth.uid == userId
+                   && (fileName == "avatar.jpg" || fileName == "avatar.png" || fileName == "avatar.jpeg")
+                   && request.resource.size < 5 * 1024 * 1024 // Max 5MB
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    match /finance_docs/{year}/{month}/{transactionId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Leave attachments (medical documents etc.)
+    match /leave_documents/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size < 10 * 1024 * 1024 // Max 10MB
+                   && (
+                        request.resource.contentType.matches('image/.*') ||
+                        request.resource.contentType == 'application/pdf'
+                      );
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

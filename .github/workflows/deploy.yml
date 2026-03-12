@@ -1,0 +1,88 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Rules regression tests
+        run: npm run test:rules
+
+      - name: Production build
+        run: npm run build
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preflight
+        env:
+          SH: ${{ secrets.SERVER_HOST }}
+          SU: ${{ secrets.SERVER_USER }}
+          SK: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SH" ] || [ -z "$SU" ] || [ -z "$SK" ]; then
+            echo "Missing required secrets: HOST, USERNAME, SSH_KEY"
+            echo "Please add these to your GitHub Repository Secrets."
+            exit 1
+          fi
+
+          if [[ "$SK" != *"-----BEGIN"* ]]; then
+            echo "Error: SSH_PRIVATE_KEY does not look like a valid private key."
+            echo "It should start with '-----BEGIN ... PRIVATE KEY-----'"
+            exit 1
+          fi
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            # Navigate to project directory
+            if [ -d "/People" ]; then
+              cd /People
+            elif [ -d "People" ]; then
+              cd People
+            elif [ -d "~/People" ]; then
+              cd ~/People
+            else
+              echo "Directory 'People' not found. Current directory: $(pwd)"
+              ls -la
+              exit 1
+            fi
+
+            echo "Deploying in $(pwd)..."
+            
+            # Force sync with GitHub (discard local changes to tracked files)
+            git fetch origin main
+            git reset --hard origin/main
+            
+            if [ -f "deploy.sh" ]; then
+              chmod +x deploy.sh
+              ./deploy.sh
+            else
+              echo "deploy.sh not found!"
+              exit 1
+            fi
