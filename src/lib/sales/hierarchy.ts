@@ -239,9 +239,29 @@ export function getHierarchyScopedUsers(
   });
   uniqueUsers.set(actor.uid, actor);
 
+  const resolveParentUidInDirectory = (user: UserDoc) => {
+    const candidates: string[] = [];
+
+    if (user.temporaryReportsTo && isAssignmentActive(user.temporaryReportsToUntil, now)) {
+      candidates.push(user.temporaryReportsTo);
+    }
+    if (user.reportsTo) candidates.push(user.reportsTo);
+    if (user.teamLeadId) candidates.push(user.teamLeadId);
+    if (user.managerId) candidates.push(user.managerId);
+
+    // Prefer a parent that exists in the fetched directory to keep the scope graph connected.
+    const connectedParent = candidates.find(
+      (candidateUid) => candidateUid !== user.uid && uniqueUsers.has(candidateUid),
+    );
+    if (connectedParent) return connectedParent;
+
+    const fallbackParent = candidates.find((candidateUid) => candidateUid !== user.uid);
+    return fallbackParent ?? null;
+  };
+
   const childrenByParent = new Map<string, UserDoc[]>();
   uniqueUsers.forEach((user) => {
-    const parentUid = getEffectiveReportsToUid(user, now);
+    const parentUid = resolveParentUidInDirectory(user);
     if (!parentUid || parentUid === user.uid) return;
     const bucket = childrenByParent.get(parentUid) ?? [];
     bucket.push(user);
