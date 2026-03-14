@@ -72,6 +72,18 @@ function getErrorMessage(error: unknown) {
 
 function canActorAssignInBulk(actor: LeadTimelineActor) {
   const normalizedRole = (actor.role ?? "").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  if (
+    normalizedRole === "MANAGER" ||
+    normalizedRole === "SENIOR_MANAGER" ||
+    normalizedRole === "GM" ||
+    normalizedRole === "AVP" ||
+    normalizedRole === "VP" ||
+    normalizedRole === "SALES_HEAD" ||
+    normalizedRole === "CBO" ||
+    normalizedRole === "CEO"
+  ) {
+    return true;
+  }
   if (normalizedRole === "SUPER_ADMIN" || normalizedRole === "ADMIN") {
     return true;
   }
@@ -164,17 +176,18 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
       sideEffectFailures: [],
     };
   }
+  const assignToUid = input.assignTo?.trim() || null;
   const transferReason = input.transferReason?.trim() || "";
-  if (input.assignTo && !transferReason) {
+  if (assignToUid && !transferReason) {
     throw new Error("Transfer reason is required for bulk assignment.");
   }
-  if (input.assignTo && !canActorAssignInBulk(input.actor)) {
+  if (assignToUid && !canActorAssignInBulk(input.actor)) {
     throw new Error("Only manager-level roles can run bulk lead assignment.");
   }
 
   const requested = input.leads.length;
   const firestore = db;
-  const summary = buildBulkActionSummary(input);
+  const summary = buildBulkActionSummary({ ...input, assignTo: assignToUid });
   const batchId = createBulkBatchId();
   const bulkLogRef = doc(firestore, "crm_bulk_actions", batchId);
 
@@ -223,7 +236,7 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
     summary,
     leadCount: requested,
     action: {
-      assignTo: input.assignTo ?? null,
+      assignTo: assignToUid,
       status: input.status ?? null,
       followUpAt: input.followUpAt ? input.followUpAt.toISOString() : null,
       source: input.source ?? null,
@@ -242,44 +255,17 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
     rollbackSafe: true,
   });
 
-  let batch = writeBatch(firestore);
-  let writes = 0;
   let updated = 0;
-  let pendingLeadIds: string[] = [];
-
-  const commitWrites = async () => {
-    if (writes === 0) return;
-    const committingLeadIds = [...pendingLeadIds];
-    try {
-      await batch.commit();
-      updated += committingLeadIds.length;
-      await heartbeat({
-        updated,
-        writeFailureCount: writeFailures.length,
-      });
-    } catch (error) {
-      const message = getErrorMessage(error);
-      for (const leadId of committingLeadIds) {
-        writeFailures.push({
-          leadId,
-          step: "write_commit",
-          error: message,
-        });
-        await recordLeadFailure(leadId, "write_commit", message);
-      }
-      throw new Error(`Bulk write commit failed: ${message}`);
-    } finally {
-      batch = writeBatch(firestore);
-      writes = 0;
-      pendingLeadIds = [];
-    }
-  };
+  let processed = 0;
 
   try {
     for (const lead of input.leads) {
+      let transferLead: LeadDoc | null = null;
+      let transferRecord: ReturnType<typeof buildLeadTransferMutation>["transferRecord"] | null = null;
+      let nextLead: LeadDoc | null = null;
+      let updates: Record<string, unknown> | null = null;
+
       try {
-        const leadRef = doc(firestore, "leads", lead.leadId);
-        const timelineRef = doc(collection(firestore, "leads", lead.leadId, "timeline"));
         const historyEntries = [
           buildLeadHistoryEntry({
             action: "Bulk Queue Action",
@@ -289,19 +275,17 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
             remarks: input.remarks?.trim() || summary,
           }),
         ];
-        const updates: Record<string, unknown> = {
+        updates = {
           updatedAt: serverTimestamp(),
           lastActionBy: input.actor.uid,
           lastActionAt: serverTimestamp(),
         };
 
-        let transferLead: LeadDoc | null = null;
-        let transferRecord: ReturnType<typeof buildLeadTransferMutation>["transferRecord"] | null = null;
-        if (input.assignTo) {
+        if (assignToUid) {
           const transfer = buildLeadTransferMutation({
             lead,
             actor: input.actor,
-            nextOwnerUid: input.assignTo,
+            nextOwnerUid: assignToUid,
             reason: transferReason,
           });
           Object.assign(updates, transfer.updates);
@@ -352,10 +336,10 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
         updates.history = arrayUnion(...historyEntries);
 
         const nextStatus = normalizeLeadStatus(input.status ?? lead.status);
-        const nextLead: LeadDoc = {
+        nextLead = {
           ...lead,
-          assignedTo: input.assignTo ?? lead.assignedTo ?? lead.ownerUid ?? null,
-          ownerUid: input.assignTo ?? lead.ownerUid ?? lead.assignedTo ?? null,
+          assignedTo: assignToUid ?? lead.assignedTo ?? lead.ownerUid ?? null,
+          ownerUid: assignToUid ?? lead.ownerUid ?? lead.assignedTo ?? null,
           status: nextStatus,
           nextFollowUp: input.followUpAt ?? lead.nextFollowUp ?? null,
           nextFollowUpDateKey: input.followUpAt
@@ -390,15 +374,44 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
                 : transferLead.campaignName ?? null,
           });
         }
+      } catch (error) {
+        const message = getErrorMessage(error);
+        writeFailures.push({
+          leadId: lead.leadId,
+          step: "write_validation",
+          error: message,
+        });
+        await recordLeadFailure(lead.leadId, "write_validation", message);
+        processed += 1;
+        if (processed % 20 === 0 || processed === requested) {
+          await heartbeat({
+            updated,
+            writeFailureCount: writeFailures.length,
+          });
+        }
+        continue;
+      }
 
-        batch.update(leadRef, updates);
-        batch.set(timelineRef, {
-          type: input.assignTo ? "reassigned" : "bulk_action_applied",
-          summary: input.assignTo ? "Bulk assignment applied" : "Bulk queue action applied",
+      try {
+        const leadBatch = writeBatch(firestore);
+        const leadRef = doc(firestore, "leads", lead.leadId);
+        const timelineRef = doc(collection(firestore, "leads", lead.leadId, "timeline"));
+        const changeRef = doc(
+          firestore,
+          "crm_bulk_actions",
+          batchId,
+          "lead_changes",
+          lead.leadId,
+        );
+
+        leadBatch.update(leadRef, updates as Record<string, unknown>);
+        leadBatch.set(timelineRef, {
+          type: assignToUid ? "reassigned" : "bulk_action_applied",
+          summary: assignToUid ? "Bulk assignment applied" : "Bulk queue action applied",
           actor: input.actor,
           metadata: {
             batchId,
-            assignTo: input.assignTo ?? null,
+            assignTo: assignToUid,
             transferReason: transferReason || null,
             transfer: transferRecord,
             status: input.status ?? null,
@@ -409,59 +422,56 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
           },
           createdAt: serverTimestamp(),
         });
-        const changeRef = doc(
-          firestore,
-          "crm_bulk_actions",
-          batchId,
-          "lead_changes",
-          lead.leadId,
-        );
-        batch.set(changeRef, {
+        leadBatch.set(changeRef, {
           leadId: lead.leadId,
           summary,
           transfer: transferRecord,
           before: buildRollbackLeadSnapshot(lead),
           after: buildProjectedRollbackSnapshot({
             lead,
-            action: input,
+            action: { ...input, assignTo: assignToUid },
             transferLead,
           }),
           rollbackReady: true,
           batchId,
           createdAt: serverTimestamp(),
         });
+        await leadBatch.commit();
+        updated += 1;
 
-        sideEffectCandidates.push({
-          leadId: lead.leadId,
-          originalLead: lead,
-          nextLead,
-        });
-        pendingLeadIds.push(lead.leadId);
-        writes += 3;
-
-        if (writes >= 300) {
-          await commitWrites();
+        if (nextLead) {
+          sideEffectCandidates.push({
+            leadId: lead.leadId,
+            originalLead: lead,
+            nextLead,
+          });
         }
       } catch (error) {
         const message = getErrorMessage(error);
         writeFailures.push({
           leadId: lead.leadId,
-          step: "write_validation",
+          step: "write_commit",
           error: message,
         });
-        await recordLeadFailure(lead.leadId, "write_validation", message);
+        await recordLeadFailure(lead.leadId, "write_commit", message);
+      }
+
+      processed += 1;
+      if (processed % 20 === 0 || processed === requested) {
+        await heartbeat({
+          updated,
+          writeFailureCount: writeFailures.length,
+        });
       }
     }
 
-    await commitWrites();
-
     for (const candidate of sideEffectCandidates) {
-      if (input.assignTo) {
+      if (assignToUid) {
         try {
           await syncLeadLinkedTasks({
             lead: candidate.nextLead,
             actorUid: input.actor.uid,
-            reassignOpenTasksTo: input.assignTo,
+            reassignOpenTasksTo: assignToUid,
           });
         } catch (error) {
           const message = getErrorMessage(error);

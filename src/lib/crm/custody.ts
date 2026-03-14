@@ -232,6 +232,18 @@ function createTransferId(leadId: string) {
 
 function assertActorCanManageLeadAssignment(actor: LeadTimelineActor) {
   const normalizedRole = (actor.role ?? "").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  if (
+    normalizedRole === "MANAGER" ||
+    normalizedRole === "SENIOR_MANAGER" ||
+    normalizedRole === "GM" ||
+    normalizedRole === "AVP" ||
+    normalizedRole === "VP" ||
+    normalizedRole === "SALES_HEAD" ||
+    normalizedRole === "CBO" ||
+    normalizedRole === "CEO"
+  ) {
+    return;
+  }
   if (normalizedRole === "SUPER_ADMIN" || normalizedRole === "ADMIN") {
     return;
   }

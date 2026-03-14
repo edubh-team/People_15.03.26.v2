@@ -74,3 +74,5 @@ service-account-key.json
 service-account.json
 .env.local
 .env.*
+
+.env*
