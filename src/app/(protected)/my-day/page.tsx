@@ -28,6 +28,7 @@ import {
   isHrUser,
 } from "@/lib/access";
 import { useScopedUsers } from "@/lib/hooks/useScopedUsers";
+import { useIdentityScopeUids } from "@/lib/hooks/useIdentityScopeUids";
 import { isClosedLeadStatus } from "@/lib/leads/status";
 import {
   buildWorkbenchCounts,
@@ -353,10 +354,16 @@ export default function MyDayPage() {
   );
   const currentMonthKey = useMemo(() => toMonthKey(new Date()), []);
   const currentMonthLabel = useMemo(() => toMonthLabel(currentMonthKey), [currentMonthKey]);
+  const identityScopeUids = useIdentityScopeUids(userDoc);
 
   const scopeUids = useMemo(
-    () => (canUseSalesQueues ? getCrmScopeUids(userDoc, scopedUsers) : []),
-    [canUseSalesQueues, scopedUsers, userDoc],
+    () => {
+      if (!canUseSalesQueues) return [];
+      const baseScope = getCrmScopeUids(userDoc, scopedUsers);
+      if (baseScope === null) return null;
+      return Array.from(new Set([...baseScope, ...identityScopeUids]));
+    },
+    [canUseSalesQueues, identityScopeUids, scopedUsers, userDoc],
   );
   const scopeKey = useMemo(
     () => (scopeUids === null ? "global" : scopeUids.join("|")),

@@ -7,6 +7,7 @@ import { CrmSurfaceRail, type CrmSurfaceMode } from "@/components/leads/CrmSurfa
 import type { CrmWorkbenchTabId } from "@/lib/crm/workbench";
 import type { CrmWorkbenchLayoutMode } from "@/components/leads/CrmWorkbench";
 import { canBulkImportLeads } from "@/lib/access";
+import { useIdentityScopeUids } from "@/lib/hooks/useIdentityScopeUids";
 
 export function EmployeeLeadsView({
   initialTab = null,
@@ -24,6 +25,7 @@ export function EmployeeLeadsView({
   focusLeadId?: string | null;
 }) {
   const { userDoc } = useAuth();
+  const identityScopeUids = useIdentityScopeUids(userDoc);
 
   const memberLookup = useMemo(() => {
     if (!userDoc) return {};
@@ -40,7 +42,7 @@ export function EmployeeLeadsView({
         <CrmSurfaceRail activeSurface={activeSurface} />
         <CrmWorkbench
           currentUser={userDoc}
-          scopeUids={[userDoc.uid]}
+          scopeUids={identityScopeUids.length > 0 ? identityScopeUids : [userDoc.uid]}
           memberLookup={memberLookup}
           heading="BDA Workbench"
           description="Open one page, work the next-best lead, and move through your queue without hunting for the right screen."

@@ -31,6 +31,7 @@ import {
 import { getCrmScopeUids } from "@/lib/crm/access";
 import { searchCrmLeads } from "@/lib/crm/search";
 import { useScopedUsers } from "@/lib/hooks/useScopedUsers";
+import { useIdentityScopeUids } from "@/lib/hooks/useIdentityScopeUids";
 import {
   getRoleLayoutProfile,
   getShellNavigationGroups,
@@ -406,9 +407,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     includeCurrentUser: true,
     includeInactive: false,
   });
+  const identityScopeUids = useIdentityScopeUids(userDoc);
   const searchScopeUids = useMemo(
-    () => getCrmScopeUids(userDoc, searchableUsers),
-    [searchableUsers, userDoc],
+    () => {
+      const baseScope = getCrmScopeUids(userDoc, searchableUsers);
+      if (baseScope === null) return null;
+      return Array.from(new Set([...(baseScope ?? []), ...identityScopeUids]));
+    },
+    [identityScopeUids, searchableUsers, userDoc],
   );
   const searchScopeKey = useMemo(
     () => (searchScopeUids === null ? "global" : searchScopeUids.join("|")),
