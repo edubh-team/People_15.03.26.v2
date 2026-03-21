@@ -7,16 +7,32 @@ service cloud.firestore {
     }
     function isSuperAdmin() {
       let u = getUserData(request.auth.uid);
-      return request.auth != null && u != null && u.data.orgRole == 'SUPER_ADMIN';
+      return request.auth != null && u != null && (
+        u.data.orgRole == 'SUPER_ADMIN' ||
+        u.data.orgRole == 'super_admin' ||
+        u.data.orgRole == 'Super Admin' ||
+        u.data.orgRole == 'super admin' ||
+        u.data.role == 'SUPER_ADMIN' ||
+        u.data.role == 'super_admin' ||
+        u.data.role == 'Super Admin' ||
+        u.data.role == 'super admin' ||
+        u.data.role == 'superAdmin' ||
+        u.data.role == 'SuperAdmin'
+      );
     }
     function isAdmin() {
       let u = getUserData(request.auth.uid);
       return request.auth != null && u != null && (
         u.data.role == 'admin' ||
         u.data.role == 'ADMIN' ||
+        u.data.role == 'Admin' ||
         u.data.orgRole == 'SUPER_ADMIN' ||
+        u.data.orgRole == 'super_admin' ||
+        u.data.orgRole == 'Super Admin' ||
+        u.data.orgRole == 'super admin' ||
         u.data.orgRole == 'ADMIN' ||
-        u.data.orgRole == 'admin'
+        u.data.orgRole == 'admin' ||
+        u.data.orgRole == 'Admin'
       );
     }
     function isManager() {
@@ -39,7 +55,11 @@ service cloud.firestore {
           'sales_head',
           'cbo',
           'ceo',
-          'Manager'
+          'Manager',
+          'Senior Manager',
+          'Sales Head',
+          'senior manager',
+          'sales head'
         ] ||
         u.data.role in [
           'MANAGER',
@@ -58,7 +78,11 @@ service cloud.firestore {
           'sales_head',
           'cbo',
           'ceo',
-          'Manager'
+          'Manager',
+          'Senior Manager',
+          'Sales Head',
+          'senior manager',
+          'sales head'
         ]
       );
     }
@@ -81,7 +105,12 @@ service cloud.firestore {
           'vp',
           'sales_head',
           'cbo',
-          'ceo'
+          'ceo',
+          'Manager',
+          'Senior Manager',
+          'Sales Head',
+          'senior manager',
+          'sales head'
         ] ||
         u.data.role in [
           'MANAGER',
@@ -99,7 +128,12 @@ service cloud.firestore {
           'vp',
           'sales_head',
           'cbo',
-          'ceo'
+          'ceo',
+          'Manager',
+          'Senior Manager',
+          'Sales Head',
+          'senior manager',
+          'sales head'
         ]
       );
     }
@@ -108,12 +142,18 @@ service cloud.firestore {
       return request.auth != null && u != null && (
         u.data.role == 'teamLead' ||
         u.data.role == 'TEAM_LEAD' ||
+        u.data.role == 'TEAMLEAD' ||
+        u.data.role == 'teamlead' ||
         u.data.orgRole == 'TEAM_LEAD' ||
+        u.data.orgRole == 'TEAMLEAD' ||
+        u.data.orgRole == 'teamlead' ||
         u.data.orgRole == 'team_lead' ||
         u.data.role == 'TeamLead' ||
         u.data.orgRole == 'TeamLead' ||
         u.data.role == 'Team Lead' ||
-        u.data.orgRole == 'Team Lead'
+        u.data.orgRole == 'Team Lead' ||
+        u.data.role == 'TEAM LEAD' ||
+        u.data.orgRole == 'TEAM LEAD'
       );
     }
     function isHR() {
@@ -122,7 +162,9 @@ service cloud.firestore {
         u.data.role == 'HR' ||
         u.data.orgRole == 'HR' ||
         u.data.role == 'hr' ||
-        u.data.orgRole == 'hr'
+        u.data.orgRole == 'hr' ||
+        u.data.role == 'Hr' ||
+        u.data.orgRole == 'Hr'
       );
     }
     function isFinancer() {
@@ -145,26 +187,70 @@ service cloud.firestore {
         u.data.role == 'bda'
       );
     }
+    function isTemporarySupervisorActive(tempUid, tempUntil) {
+      return tempUid != null &&
+        (
+          tempUntil == null ||
+          !(tempUntil is timestamp) ||
+          tempUntil >= request.time
+        );
+    }
+
     function reportsTo(uid) {
       let userPath = /databases/$(database)/documents/users/$(uid);
       let targetExists = request.auth != null && uid != null && exists(userPath);
       let target = targetExists ? get(userPath).data : null;
       let targetReportsTo = target != null ? target.get("reportsTo", null) : null;
-      let parentPath = /databases/$(database)/documents/users/$(targetReportsTo);
-      let parentExists = targetReportsTo != null && exists(parentPath);
+      let directParentUid = target != null
+        ? (
+            isTemporarySupervisorActive(
+              target.get("temporaryReportsTo", null),
+              target.get("temporaryReportsToUntil", null)
+            )
+              ? target.get("temporaryReportsTo", null)
+              : (
+                  targetReportsTo != null
+                    ? targetReportsTo
+                    : (
+                        target.get("teamLeadId", null) != null
+                          ? target.get("teamLeadId", null)
+                          : target.get("managerId", null)
+                      )
+                )
+          )
+        : null;
+      let parentPath = /databases/$(database)/documents/users/$(directParentUid);
+      let parentExists = directParentUid != null && exists(parentPath);
       let parent = parentExists ? get(parentPath).data : null;
 
       return request.auth != null &&
         uid != null &&
         targetExists &&
         (
-          target.get("reportsTo", null) == request.auth.uid ||
+          targetReportsTo == request.auth.uid ||
           target.get("teamLeadId", null) == request.auth.uid ||
           target.get("managerId", null) == request.auth.uid ||
           (
-            targetReportsTo != null &&
-            parentExists &&
-            parent.get("reportsTo", null) == request.auth.uid
+            isTemporarySupervisorActive(
+              target.get("temporaryReportsTo", null),
+              target.get("temporaryReportsToUntil", null)
+            ) &&
+            target.get("temporaryReportsTo", null) == request.auth.uid
+          ) ||
+          directParentUid == request.auth.uid ||
+          (
+            parentExists && (
+              parent.get("reportsTo", null) == request.auth.uid ||
+              parent.get("teamLeadId", null) == request.auth.uid ||
+              parent.get("managerId", null) == request.auth.uid ||
+              (
+                isTemporarySupervisorActive(
+                  parent.get("temporaryReportsTo", null),
+                  parent.get("temporaryReportsToUntil", null)
+                ) &&
+                parent.get("temporaryReportsTo", null) == request.auth.uid
+              )
+            )
           )
         );
     }
@@ -235,14 +321,14 @@ service cloud.firestore {
                   (request.auth != null && (
                     resource.data.assignedTo == request.auth.uid || 
                     resource.data.ownerUid == request.auth.uid ||
-                    reportsTo(resource.data.assignedTo)
+                    (resource.data.assignedTo != null && reportsTo(resource.data.assignedTo))
                   ));
       allow create: if canCreateLeadWithRequestedOwnership();
       allow update: if resource != null && (isSuperAdmin() || 
                     (request.auth != null && (
                         resource.data.assignedTo == request.auth.uid || 
                         resource.data.ownerUid == request.auth.uid || 
-                        reportsTo(resource.data.assignedTo)
+                        (resource.data.assignedTo != null && reportsTo(resource.data.assignedTo))
                     ) && (
                       !isLeadAssignmentMutation() || canMutateLeadAssignment()
                     )));
@@ -279,6 +365,23 @@ service cloud.firestore {
         allow create, update: if isSuperAdmin() || isHR() || ((isManager() || isTeamLead()) && reportsTo(userId));
       }
 
+      match /lifecycle_audit/{auditId} {
+        allow read: if request.auth != null && (
+          request.auth.uid == userId ||
+          isSuperAdmin() ||
+          isAdmin() ||
+          isHR() ||
+          isManagerOrAbove()
+        );
+        allow create: if request.auth != null && (
+          isSuperAdmin() ||
+          isAdmin() ||
+          isHR() ||
+          isManagerOrAbove()
+        );
+        allow update, delete: if false;
+      }
+
       match /attendance/{allSubpaths=**} {
         allow read: if request.auth != null && (
           request.auth.uid == userId ||
@@ -310,6 +413,37 @@ service cloud.firestore {
     // HR Collections
     match /candidates/{candidateId} {
       allow read, write: if isSuperAdmin() || isHR();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR()
+      );
+    }
+
+    match /employee_lifecycle_audit/{auditId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove()
+      );
+      allow update, delete: if false;
     }
     
     // Legacy snake_case collection (kept for safety)
@@ -516,13 +650,13 @@ service cloud.firestore {
         request.auth.uid == resource.data.assignedTo ||
         request.auth.uid == resource.data.ownerUid ||
         isSuperAdmin() ||
-        ((isTeamLead() || isManagerOrAbove()) && (
-          reportsTo(resource.data.assignedTo) ||
-          reportsTo(resource.data.ownerUid) ||
-          (request.resource.data.assignedTo != null && reportsTo(request.resource.data.assignedTo)) ||
-          (request.resource.data.ownerUid != null && reportsTo(request.resource.data.ownerUid))
-        )) ||
-          (isManagerOrAbove() && resource.data.assignedTo == null && resource.data.ownerUid == null)
+        isManagerOrAbove() ||
+        (
+          isTeamLead() && (
+            (resource.data.assignedTo != null && reportsTo(resource.data.assignedTo)) ||
+            (resource.data.ownerUid != null && reportsTo(resource.data.ownerUid))
+          )
+        )
       ) && (
         !isLeadAssignmentMutation() || canMutateLeadAssignment()
       );
@@ -689,13 +823,29 @@ service cloud.firestore {
       allow read: if request.auth != null && (
         isSuperAdmin() ||
         isAdmin() ||
-        isManagerOrAbove()
+        isManagerOrAbove() ||
+        isBDA()
       );
       allow create, update: if request.auth != null && (
         isSuperAdmin() ||
         isAdmin() ||
+        isManagerOrAbove() ||
+        isBDA()
+      );
+    }
+
+    match /crm_whatsapp_ingest_events/{eventId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
         isManagerOrAbove()
       );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin()
+      );
+      allow update, delete: if false;
     }
 
     match /bda_pip_cases/{caseId} {

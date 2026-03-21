@@ -85,6 +85,7 @@ const PERSONAL_GROUP: ShellNavGroup = {
   label: "MY ACCOUNT",
   children: [
     { label: "My Profile", href: "/profile/me", icon: "settings" },
+    { label: "Knowledge Center", href: CANONICAL_DOMAIN_ROUTES.KNOWLEDGE_CENTER, icon: "reports" },
     { label: "Messages", href: "/chat", icon: "chat" },
   ],
 };
@@ -102,6 +103,19 @@ const SALES_BDA_GROUP: ShellNavGroup = {
   key: "SALES",
   label: "SALES EXECUTION",
   children: [{ label: "Leads", href: CANONICAL_DOMAIN_ROUTES.CRM, icon: "leads" }],
+};
+
+const CHANNEL_PARTNER_GROUP: ShellNavGroup = {
+  key: "CHANNEL",
+  label: "CHANNEL PARTNER",
+  children: [
+    {
+      label: "Partner Dashboard",
+      href: CANONICAL_DOMAIN_ROUTES.CHANNEL_PARTNER,
+      icon: "dashboard",
+    },
+    { label: "Leads", href: CANONICAL_DOMAIN_ROUTES.CRM, icon: "leads" },
+  ],
 };
 
 const TRAINING_GROUP: ShellNavGroup = {
@@ -246,6 +260,7 @@ function resolveLayoutKey(user: RoleSource): RoleLayoutKey {
     case "CEO":
     case "TEAM_LEAD":
     case "EMPLOYEE":
+    case "CHANNEL_PARTNER":
     case "BDA_TRAINEE":
     case "BDM_TRAINING":
       return primaryRole === "MANAGER" ||
@@ -279,6 +294,7 @@ function resolveLayoutKey(user: RoleSource): RoleLayoutKey {
       }
       if (hasRole(user, "BDM_TRAINING")) return "BDM_TRAINING";
       if (hasRole(user, "BDA_TRAINEE")) return "BDA_TRAINEE";
+      if (hasRole(user, "CHANNEL_PARTNER")) return "CHANNEL_PARTNER";
       if (hasRole(user, "TEAM_LEAD")) return "TEAM_LEAD";
       if (hasRole(user, "FINANCER")) return "FINANCER";
       if (hasRole(user, "HR")) return "HR";
@@ -403,6 +419,22 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         showTeamModeToggle: false,
         showSetup: false,
         shellGroups: [SALES_BDA_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        crm: {
+          defaultSection: "status",
+          visibleSections: CRM_ADMIN_SECTIONS,
+          workbenchActions: DEFAULT_CRM_ACTIONS,
+          showLeadInspector: false,
+        },
+      };
+    case "CHANNEL_PARTNER":
+      return {
+        key,
+        homeRoute: CANONICAL_DOMAIN_ROUTES.CHANNEL_PARTNER,
+        defaultWorkspace: "CRM",
+        availableWorkspaces: ["CRM"],
+        showTeamModeToggle: false,
+        showSetup: false,
+        shellGroups: [CHANNEL_PARTNER_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "status",
           visibleSections: CRM_ADMIN_SECTIONS,

@@ -10,14 +10,30 @@ function readArg(name) {
 
 function runStep(step) {
   console.log(`\n[${step.id}] ${step.label}`);
-  const result = spawnSync(step.command, step.args, {
-    stdio: "inherit",
-    shell: true,
-  });
+  const command = step.command;
+  const args = step.args;
+  const result = spawnSync(command, args, { stdio: "inherit", shell: false });
+  if (result.error) {
+    throw new Error(`${step.id} failed to start: ${result.error.message}`);
+  }
   const code = typeof result.status === "number" ? result.status : 1;
   if (code !== 0) {
     throw new Error(`${step.id} failed with exit code ${code}.`);
   }
+}
+
+function npmRunner(args) {
+  if (process.platform === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", `npm ${args.join(" ")}`],
+    };
+  }
+
+  return {
+    command: "npm",
+    args,
+  };
 }
 
 function main() {
@@ -25,14 +41,12 @@ function main() {
     {
       id: "CP-1",
       label: "Rules + typing gate",
-      command: "npm",
-      args: ["run", "typecheck"],
+      ...npmRunner(["run", "typecheck"]),
     },
     {
       id: "CP-2",
       label: "Rules regression suite",
-      command: "npm",
-      args: ["run", "test:rules"],
+      ...npmRunner(["run", "test:rules"]),
     },
     ...(SKIP_BUILD
       ? []
@@ -40,21 +54,18 @@ function main() {
           {
             id: "CP-3",
             label: "Production build gate",
-            command: "npm",
-            args: ["run", "build"],
+            ...npmRunner(["run", "build"]),
           },
         ]),
     {
       id: "CP-4",
       label: "Role-wise UAT data readiness",
-      command: "npm",
-      args: ["run", "verify:uat", "--", `--prefix=${PREFIX}`],
+      ...npmRunner(["run", "verify:uat", "--", `--prefix=${PREFIX}`]),
     },
     {
       id: "CP-5",
       label: "Bi-weekly dry-run simulation (2 cycles)",
-      command: "npm",
-      args: ["run", "simulate:biweekly", "--", "--cycles=2", `--prefix=${PREFIX}`],
+      ...npmRunner(["run", "simulate:biweekly", "--", "--cycles=2", `--prefix=${PREFIX}`]),
     },
   ];
 

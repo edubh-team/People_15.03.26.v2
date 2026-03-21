@@ -17,11 +17,6 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { canAssignSalesScope } from "@/lib/sales/hierarchy";
-import {
-  createAutoAssignmentNotifications,
-  getBulkCrmRoutingAssignments,
-} from "@/lib/crm/automation-client";
 import { findBulkLeadDuplicateCandidates, type LeadDuplicateCandidate, normalizeLeadEmail, normalizeLeadName, normalizeLeadPhone } from "@/lib/crm/dedupe";
 import { buildLeadActor, buildLeadHistoryEntry } from "@/lib/crm/timeline";
 import { buildLeadCustodyDefaults } from "@/lib/crm/custody";
@@ -164,8 +159,6 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
   const [recentBatchesLoading, setRecentBatchesLoading] = useState(false);
   const [recentBatchesError, setRecentBatchesError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const canAutoRouteImports = canAssignSalesScope(userDoc);
   const parsedTags = useMemo(() => parseTagList(batchTagsInput), [batchTagsInput]);
 
   useEffect(() => {
@@ -446,8 +439,12 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
     let autoAssignedRows = 0;
 
     try {
+      const uploaderUid = userDoc?.uid ?? firebaseUser?.uid ?? null;
+      if (!uploaderUid) {
+        throw new Error("User session missing. Please re-login before importing.");
+      }
       const actor = buildLeadActor({
-        uid: firebaseUser?.uid ?? "bulk-import",
+        uid: uploaderUid,
         displayName: userDoc?.displayName ?? firebaseUser?.email ?? "Bulk Import",
         email: userDoc?.email ?? firebaseUser?.email ?? null,
         role: userDoc?.role ?? null,
@@ -490,16 +487,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
         startedAt: serverTimestamp(),
       });
 
-      const assignmentPlan =
-        canAutoRouteImports && userDoc?.uid
-          ? await getBulkCrmRoutingAssignments(
-              userDoc.uid,
-              eligibleLeads.map((lead) => lead.leadId),
-            )
-          : new Map<string, string | null>();
-      const fallbackAssigneeUid = !canAutoRouteImports ? userDoc?.uid ?? null : null;
-
-      const BATCH_SIZE = 400;
+      const BATCH_SIZE = 200;
       const chunks = [];
       for (let i = 0; i < eligibleLeads.length; i += BATCH_SIZE) {
         chunks.push(eligibleLeads.slice(i, i + BATCH_SIZE));
@@ -519,7 +507,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
 
           const persistedLead = { ...lead } as LeadDoc & { previewKey?: string };
           delete persistedLead.previewKey;
-          const assigneeUid = assignmentPlan.get(lead.leadId) ?? fallbackAssigneeUid;
+          const assigneeUid = uploaderUid;
           if (assigneeUid) autoAssignedRows += 1;
           const contextualLeadTags = toStringArray(lead.leadTags);
           const contextualLeadTagsNormalized = contextualLeadTags.map((tag) => tag.toLowerCase());
@@ -581,7 +569,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
           });
           batch.set(timelineRef, {
             type: "created",
-            summary: assigneeUid ? "Lead imported and auto-routed" : "Lead imported from spreadsheet",
+            summary: "Lead imported to uploader queue",
             actor,
             metadata: {
               source: "bulk_import",
@@ -594,7 +582,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
               leadLocation: lead.leadLocation ?? null,
               preferredLanguage: lead.preferredLanguage ?? null,
               assignedTo: assigneeUid,
-              routingMode: assigneeUid ? "availability_quota" : "manual_followup_required",
+              routingMode: "uploader_queue",
               duplicateFlag: duplicateReasons.length > 0,
               duplicateReasons: duplicateReasons.length > 0 ? duplicateReasons.join(" | ") : null,
             },
@@ -620,12 +608,6 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
           });
         }
       }
-
-      await createAutoAssignmentNotifications({
-        assignments: assignmentPlan,
-        actor,
-        sourceLabel: "imported",
-      });
 
       if (importBatchRef) {
         await updateDoc(importBatchRef, {
@@ -926,11 +908,9 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
                 </div>
               )}
 
-              {canAutoRouteImports ? (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-                  Imported leads will auto-route across checked-in team members using availability and quota balancing.
-                </div>
-              ) : null}
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+                Imported leads are added to your queue first. Use Assign/Reassign to distribute them to managers and BDAs.
+              </div>
 
               {/* Preview Table */}
               <div className="rounded-xl border border-slate-200 overflow-hidden">

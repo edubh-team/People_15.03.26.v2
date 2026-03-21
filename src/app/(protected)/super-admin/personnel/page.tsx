@@ -32,6 +32,7 @@ import {
 const SALES_ROLE_OPTIONS = [
   { label: "BDA (Trainee)", value: "BDA_TRAINEE" },
   { label: "BDA", value: "BDA" },
+  { label: "Channel Partner", value: "CHANNEL_PARTNER" },
   { label: "BDM (Training)", value: "BDM_TRAINING" },
   { label: "Team Lead", value: "TEAM_LEAD" },
   { label: "Manager", value: "MANAGER" },
@@ -58,6 +59,7 @@ function mapOrgRoleToSystemRole(selectedOrgRole: string): UserDoc["role"] {
 
   switch (normalized) {
     case "BDA_TRAINEE":
+    case "CHANNEL_PARTNER":
     case "BDM_TRAINING":
       return "employee";
     case "TEAM_LEAD":

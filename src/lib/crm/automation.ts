@@ -95,7 +95,12 @@ function isActiveUser(user: UserDoc) {
 
 function isIndividualContributor(user: UserDoc) {
   const role = getPrimaryRole(user);
-  return role === "EMPLOYEE" || role === "BDA" || role === "BDA_TRAINEE";
+  return (
+    role === "EMPLOYEE" ||
+    role === "BDA" ||
+    role === "BDA_TRAINEE" ||
+    role === "CHANNEL_PARTNER"
+  );
 }
 
 export function canReceiveAutoAssignedLeads(user: UserDoc) {

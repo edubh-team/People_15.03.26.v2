@@ -245,6 +245,7 @@ export default function RecruitmentPage() {
                     <option value="">Select Role...</option>
                     <option value="BDA_TRAINEE">BDA (Trainee)</option>
                     <option value="BDA">Business Development Associate (BDA)</option>
+                    <option value="CHANNEL_PARTNER">Channel Partner</option>
                     <option value="BDM_TRAINING">BDM (Training)</option>
                     <option value="Team Lead">Team Lead</option>
                     <option value="Manager">Manager</option>

@@ -35,6 +35,7 @@ export type CanonicalRole =
   | "TEAM_LEAD"
   | "EMPLOYEE"
   | "BDA"
+  | "CHANNEL_PARTNER"
   | "BDA_TRAINEE"
   | "BDM_TRAINING"
   | "UNKNOWN";
@@ -88,6 +89,13 @@ export function normalizeRoleValue(value?: string | null): CanonicalRole {
       return "EMPLOYEE";
     case "BDA":
       return "BDA";
+    case "CHANNEL_PARTNER":
+    case "CHANNELPARTNER":
+    case "CHANNEL_PARTNERS":
+    case "CHANNELPARTNERS":
+    case "PARTNER":
+    case "CP":
+      return "CHANNEL_PARTNER";
     case "BDA_TRAINEE":
     case "BDAT":
     case "BDA_TRAINING":
@@ -234,6 +242,8 @@ export function formatRoleLabel(value?: string | null) {
       return "Employee";
     case "BDA":
       return "BDA";
+    case "CHANNEL_PARTNER":
+      return "Channel Partner";
     case "BDA_TRAINEE":
       return "BDA (Trainee)";
     case "BDM_TRAINING":

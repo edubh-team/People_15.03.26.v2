@@ -157,6 +157,164 @@ async function seedBaseData() {
         createdAt: now,
         updatedAt: now,
       }),
+      setDoc(doc(db, "users", "ceo1"), {
+        uid: "ceo1",
+        email: "ceo@example.com",
+        displayName: "CEO One",
+        role: "CEO",
+        orgRole: "CEO",
+        status: "active",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "cbo1"), {
+        uid: "cbo1",
+        email: "cbo@example.com",
+        displayName: "CBO One",
+        role: "CBO",
+        orgRole: "CBO",
+        status: "active",
+        reportsTo: "ceo1",
+        managerId: "ceo1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "saleshead1"), {
+        uid: "saleshead1",
+        email: "saleshead@example.com",
+        displayName: "Sales Head One",
+        role: "SALES_HEAD",
+        orgRole: "SALES_HEAD",
+        status: "active",
+        reportsTo: "cbo1",
+        managerId: "cbo1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "vp1"), {
+        uid: "vp1",
+        email: "vp@example.com",
+        displayName: "VP One",
+        role: "VP",
+        orgRole: "VP",
+        status: "active",
+        reportsTo: "saleshead1",
+        managerId: "saleshead1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "avp1"), {
+        uid: "avp1",
+        email: "avp@example.com",
+        displayName: "AVP One",
+        role: "AVP",
+        orgRole: "AVP",
+        status: "active",
+        reportsTo: "vp1",
+        managerId: "vp1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "gm1"), {
+        uid: "gm1",
+        email: "gm@example.com",
+        displayName: "GM One",
+        role: "GM",
+        orgRole: "GM",
+        status: "active",
+        reportsTo: "avp1",
+        managerId: "avp1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "seniormanager2"), {
+        uid: "seniormanager2",
+        email: "seniormanager2@example.com",
+        displayName: "Senior Manager Two",
+        role: "SENIOR_MANAGER",
+        orgRole: "SENIOR_MANAGER",
+        status: "active",
+        reportsTo: "gm1",
+        managerId: "gm1",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "managerDeep"), {
+        uid: "managerDeep",
+        email: "managerdeep@example.com",
+        displayName: "Manager Deep",
+        role: "manager",
+        orgRole: "MANAGER",
+        status: "active",
+        reportsTo: "seniormanager2",
+        managerId: "seniormanager2",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "teamleadDeep"), {
+        uid: "teamleadDeep",
+        email: "teamleaddeep@example.com",
+        displayName: "Team Lead Deep",
+        role: "teamLead",
+        orgRole: "TEAM_LEAD",
+        status: "active",
+        reportsTo: "managerDeep",
+        managerId: "managerDeep",
+        teamLeadId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "bdaDeep"), {
+        uid: "bdaDeep",
+        email: "bdadeep@example.com",
+        displayName: "BDA Deep",
+        role: "BDA",
+        orgRole: "BDA",
+        status: "active",
+        reportsTo: "managerDeep",
+        managerId: "managerDeep",
+        teamLeadId: "teamleadDeep",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "employeeTemp"), {
+        uid: "employeeTemp",
+        email: "employeetemp@example.com",
+        displayName: "Employee Temporary Scope",
+        role: "employee",
+        orgRole: "EMPLOYEE",
+        status: "active",
+        reportsTo: "manager2",
+        managerId: "manager2",
+        teamLeadId: null,
+        temporaryReportsTo: "manager1",
+        temporaryReportsToUntil: new Date("2026-03-15T00:00:00.000Z"),
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "users", "employeeTempExpired"), {
+        uid: "employeeTempExpired",
+        email: "employeetempexpired@example.com",
+        displayName: "Employee Temporary Scope Expired",
+        role: "employee",
+        orgRole: "EMPLOYEE",
+        status: "active",
+        reportsTo: "manager2",
+        managerId: "manager2",
+        teamLeadId: null,
+        temporaryReportsTo: "manager1",
+        temporaryReportsToUntil: new Date("2026-01-01T00:00:00.000Z"),
+        createdAt: now,
+        updatedAt: now,
+      }),
       setDoc(doc(db, "users", "employee1", "private_data", "keys"), {
         encryptedPrivateKey: "secret-1",
       }),
@@ -187,6 +345,33 @@ async function seedBaseData() {
         assignedTo: "bda1",
         ownerUid: "bda1",
         status: "followup",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "leads", "lead-deep-owned"), {
+        leadId: "lead-deep-owned",
+        name: "Deep Chain Lead",
+        assignedTo: "bdaDeep",
+        ownerUid: "bdaDeep",
+        status: "new",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "leads", "lead-temp-owned"), {
+        leadId: "lead-temp-owned",
+        name: "Temporary Reporting Lead",
+        assignedTo: "employeeTemp",
+        ownerUid: "employeeTemp",
+        status: "new",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "leads", "lead-temp-expired-owned"), {
+        leadId: "lead-temp-expired-owned",
+        name: "Expired Temporary Reporting Lead",
+        assignedTo: "employeeTempExpired",
+        ownerUid: "employeeTempExpired",
+        status: "new",
         createdAt: now,
         updatedAt: now,
       }),
@@ -404,6 +589,42 @@ async function seedBaseData() {
         },
         createdAt: now,
       }),
+      setDoc(doc(db, "employees", "employee1"), {
+        email: "employee1@example.com",
+        role: "employee",
+        status: "active",
+        teamLeadId: "teamlead1",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      setDoc(doc(db, "employee_lifecycle_audit", "lifecycle-1"), {
+        id: "lifecycle-1",
+        targetUid: "employee1",
+        action: "inactive_till",
+        actor: {
+          uid: "manager1",
+          role: "MANAGER",
+        },
+        reason: "Test lifecycle",
+        createdAt: now,
+      }),
+      setDoc(doc(db, "users", "employee1", "lifecycle_audit", "lifecycle-1"), {
+        id: "lifecycle-1",
+        targetUid: "employee1",
+        action: "inactive_till",
+        actor: {
+          uid: "manager1",
+          role: "MANAGER",
+        },
+        reason: "Test lifecycle",
+        createdAt: now,
+      }),
+      setDoc(doc(db, "crm_whatsapp_ingest_events", "wa-1"), {
+        source: "whatsapp",
+        leadId: "lead-bda-owned",
+        phone: "919999999999",
+        createdAt: now,
+      }),
       setDoc(doc(db, "settings", "sales_targets"), {
         "2026-02": 1200000,
         updatedAt: now,
@@ -471,6 +692,43 @@ test("allows ADMIN to update employee role/orgRole", async () => {
       updatedAt: now,
     }),
   );
+});
+
+test("allows authenticated reads on employees registry and restricts writes to management roles", async () => {
+  await assertSucceeds(getDoc(doc(authedDb("employee1"), "employees", "employee1")));
+  await assertSucceeds(
+    updateDoc(doc(authedDb("manager1"), "employees", "employee1"), {
+      status: "inactive",
+      updatedAt: now,
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(authedDb("employee1"), "employees", "employee1"), {
+      status: "inactive",
+      updatedAt: now,
+    }),
+  );
+});
+
+test("allows scoped lifecycle audit visibility and keeps lifecycle records immutable", async () => {
+  await assertSucceeds(getDoc(doc(authedDb("manager1"), "employee_lifecycle_audit", "lifecycle-1")));
+  await assertSucceeds(
+    getDoc(doc(authedDb("employee1"), "users", "employee1", "lifecycle_audit", "lifecycle-1")),
+  );
+  await assertFails(
+    getDoc(doc(authedDb("employee2"), "users", "employee1", "lifecycle_audit", "lifecycle-1")),
+  );
+  await assertFails(
+    updateDoc(doc(authedDb("manager1"), "employee_lifecycle_audit", "lifecycle-1"), {
+      reason: "tamper",
+      updatedAt: now,
+    }),
+  );
+});
+
+test("allows management read access to WhatsApp ingest logs and blocks individual contributors", async () => {
+  await assertSucceeds(getDoc(doc(authedDb("manager1"), "crm_whatsapp_ingest_events", "wa-1")));
+  await assertFails(getDoc(doc(authedDb("employee1"), "crm_whatsapp_ingest_events", "wa-1")));
 });
 
 test("denies non-admin non-hr non-superadmin from updating unrelated user profile", async () => {
@@ -555,6 +813,43 @@ test("allows manager-and-above roles to reassign ownership inside scope", async 
       assignedTo: "employee1",
       ownerUid: "employee1",
       assignedBy: "manager1",
+      updatedAt: now,
+    }),
+  );
+});
+
+test("allows extended hierarchy leadership to manage deep-reporting leads", async () => {
+  await assertSucceeds(
+    updateDoc(doc(authedDb("gm1"), "leads", "lead-deep-owned"), {
+      assignedTo: "managerDeep",
+      ownerUid: "managerDeep",
+      assignedBy: "gm1",
+      updatedAt: now,
+    }),
+  );
+
+  await assertFails(
+    updateDoc(doc(authedDb("employee2"), "leads", "lead-deep-owned"), {
+      assignedTo: "employee2",
+      ownerUid: "employee2",
+      updatedAt: now,
+    }),
+  );
+});
+
+test("keeps manager transfers enabled while non-managers stay blocked", async () => {
+  await assertSucceeds(
+    updateDoc(doc(authedDb("manager1"), "leads", "lead-temp-owned"), {
+      assignedTo: "employee1",
+      ownerUid: "employee1",
+      updatedAt: now,
+    }),
+  );
+
+  await assertFails(
+    updateDoc(doc(authedDb("employee2"), "leads", "lead-temp-expired-owned"), {
+      assignedTo: "employee1",
+      ownerUid: "employee1",
       updatedAt: now,
     }),
   );
@@ -871,10 +1166,11 @@ test("denies non-management users from reading CRM bulk execution logs", async (
   );
 });
 
-test("allows manager-and-above roles to access CRM import batches", async () => {
+test("allows manager-and-above roles plus BDA to access CRM import batches", async () => {
   await assertSucceeds(getDoc(doc(authedDb("manager1"), "crm_import_batches", "import-batch-1")));
   await assertSucceeds(getDoc(doc(authedDb("admin1"), "crm_import_batches", "import-batch-1")));
   await assertSucceeds(getDoc(doc(authedDb("seniormanager1"), "crm_import_batches", "import-batch-1")));
+  await assertSucceeds(getDoc(doc(authedDb("bda1"), "crm_import_batches", "import-batch-1")));
 
   await assertSucceeds(
     setDoc(doc(authedDb("manager1"), "crm_import_batches", "import-batch-2"), {
@@ -904,6 +1200,25 @@ test("allows manager-and-above roles to access CRM import batches", async () => 
       createdAt: now,
       updatedAt: now,
       status: "processing",
+    }),
+  );
+
+  await assertSucceeds(
+    setDoc(doc(authedDb("bda1"), "crm_import_batches", "import-batch-4"), {
+      batchId: "import-batch-4",
+      sourceTag: "BDA Upload",
+      tags: ["June"],
+      createdByUid: "bda1",
+      createdAt: now,
+      updatedAt: now,
+      status: "processing",
+    }),
+  );
+
+  await assertSucceeds(
+    updateDoc(doc(authedDb("bda1"), "crm_import_batches", "import-batch-4"), {
+      status: "completed",
+      updatedAt: now,
     }),
   );
 });

@@ -27,8 +27,17 @@ import MainLogo from "@/assets/img/main.png";
 import LeadDetailPanel from "@/components/leads/LeadDetailPanel";
 import {
   getDisplayRole,
+  getPrimaryRole,
 } from "@/lib/access";
+import { GuidedTourModal } from "@/components/knowledge/GuidedTourModal";
 import { getCrmScopeUids } from "@/lib/crm/access";
+import { getRoleKnowledgeGuide } from "@/lib/knowledge-center/content";
+import {
+  clearGuidedTourCompletion,
+  getGuidedTourDoneStorageKey,
+  GUIDED_TOUR_FORCE_START_KEY,
+  markGuidedTourCompleted,
+} from "@/lib/knowledge-center/state";
 import { searchCrmLeads } from "@/lib/crm/search";
 import { useScopedUsers } from "@/lib/hooks/useScopedUsers";
 import { useIdentityScopeUids } from "@/lib/hooks/useIdentityScopeUids";
@@ -57,11 +66,13 @@ const RECENT_ROUTES_LIMIT = 5;
 
 const KNOWN_ROUTE_LABELS: Record<string, string> = {
   "/my-day": "My Day",
+  "/knowledge-center": "Knowledge Center",
   "/crm/leads": "CRM Leads",
   "/team": "Team Management",
   "/tasks": "Tasks",
   "/reports": "Reports",
   "/training": "Training Dashboard",
+  "/channel-partner/dashboard": "Channel Partner Dashboard",
   "/attendance": "Attendance",
   "/chat": "Messages",
   "/hr": "People Ops",
@@ -401,6 +412,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const presenceQuery = useMyPresence(firebaseUser?.uid ?? null);
   const todayKey = useMemo(() => getTodayKey(), []);
   const layoutProfile = useMemo(() => getRoleLayoutProfile(userDoc), [userDoc]);
+  const primaryRole = useMemo(() => getPrimaryRole(userDoc), [userDoc]);
+  const roleGuide = useMemo(() => getRoleKnowledgeGuide(primaryRole), [primaryRole]);
   const homeRoute = layoutProfile.homeRoute;
   const canSwitchWorkspace = layoutProfile.availableWorkspaces.length > 1;
   const { users: searchableUsers } = useScopedUsers(userDoc, {
@@ -441,7 +454,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [canGoBack, setCanGoBack] = useState(false);
   const [inPageSections, setInPageSections] = useState<Array<{ id: string; label: string }>>([]);
   const [activeInPageSectionId, setActiveInPageSectionId] = useState<string | null>(null);
+  const [guidedTourOpen, setGuidedTourOpen] = useState(false);
+  const [guidedTourStepIndex, setGuidedTourStepIndex] = useState(0);
   const inPageSectionRefreshTimerRef = useRef<number | null>(null);
+  const guidedTourBootstrapKeyRef = useRef<string | null>(null);
   const routeKey = useMemo(() => {
     const query = searchParams.toString();
     return query ? `${pathname}?${query}` : pathname;
@@ -474,6 +490,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
          }
      }
    }
+
+  function openGuidedTour(options?: { resetCompletion?: boolean }) {
+    if (options?.resetCompletion) {
+      clearGuidedTourCompletion(primaryRole);
+    }
+    setGuidedTourStepIndex(0);
+    setGuidedTourOpen(true);
+  }
+
+  function closeGuidedTourTemporarily() {
+    setGuidedTourOpen(false);
+  }
+
+  function completeGuidedTour() {
+    markGuidedTourCompleted(primaryRole);
+    setGuidedTourOpen(false);
+  }
 
   const menuVariants = {
     open: {
@@ -549,6 +582,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.localStorage.setItem("ui.sidebar.quickAccessOpen", quickAccessOpen ? "1" : "0");
     } catch {}
   }, [hasHydratedUiPrefs, quickAccessOpen]);
+
+  useEffect(() => {
+    if (!userDoc || roleGuide.tourSteps.length === 0) return;
+
+    const bootstrapKey = `${userDoc.uid}:${primaryRole}`;
+    if (guidedTourBootstrapKeyRef.current === bootstrapKey) return;
+    guidedTourBootstrapKeyRef.current = bootstrapKey;
+
+    try {
+      const forceStart = window.localStorage.getItem(GUIDED_TOUR_FORCE_START_KEY) === "1";
+      if (forceStart) {
+        window.localStorage.removeItem(GUIDED_TOUR_FORCE_START_KEY);
+        openGuidedTour({ resetCompletion: true });
+        return;
+      }
+
+      const isCompleted =
+        window.localStorage.getItem(getGuidedTourDoneStorageKey(primaryRole)) === "1";
+      if (!isCompleted) {
+        openGuidedTour();
+      }
+    } catch {}
+  }, [primaryRole, roleGuide.tourSteps.length, userDoc]);
 
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1997,6 +2053,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     >
                       Attendance History
                     </Link>
+                    <Link
+                      href={CANONICAL_DOMAIN_ROUTES.KNOWLEDGE_CENTER}
+                      className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      Knowledge Center
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        openGuidedTour({ resetCompletion: true });
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      Start guided tour
+                    </button>
                     <button
                       type="button"
                       onClick={() => void onLogout()}
@@ -2276,6 +2349,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </nav>
+
+        <GuidedTourModal
+          open={guidedTourOpen}
+          roleLabel={roleGuide.title}
+          steps={roleGuide.tourSteps}
+          stepIndex={guidedTourStepIndex}
+          onStepChange={setGuidedTourStepIndex}
+          onClose={closeGuidedTourTemporarily}
+          onComplete={completeGuidedTour}
+        />
 
         {userDoc ? (
           <LeadDetailPanel

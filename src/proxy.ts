@@ -20,6 +20,8 @@ const PROTECTED_PREFIXES = [
   "/tasks",
   "/team",
   "/team-lead",
+  "/channel-partner",
+  "/knowledge-center",
 ];
 
 function isProtected(req: NextRequest) {

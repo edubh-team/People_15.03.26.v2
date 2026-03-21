@@ -6,6 +6,8 @@ export const CANONICAL_DOMAIN_ROUTES = {
   PAYROLL: "/payroll",
   REPORTS: "/reports",
   TRAINING: "/training",
+  CHANNEL_PARTNER: "/channel-partner/dashboard",
+  KNOWLEDGE_CENTER: "/knowledge-center",
   FINANCE: "/finance",
   SUPER_ADMIN: "/super-admin/mission-control",
   DASHBOARD: "/dashboard",
