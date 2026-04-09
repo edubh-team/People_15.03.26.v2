@@ -199,20 +199,40 @@ export default function ProfileUidPage() {
         console.error("Profile tasks listener error", error);
       },
     );
-    const lq = query(collection(db, "leads"), where("assignedTo", "==", viewingUid), limit(1000));
-    const unsubLeads = onSnapshot(
-      lq,
+    const leadBuckets = new Map<string, Set<string>>();
+    const syncLeadStats = () => {
+      const merged = new Set<string>();
+      leadBuckets.forEach((bucket) => {
+        bucket.forEach((leadId) => merged.add(leadId));
+      });
+      setLeadStats({ total: merged.size });
+    };
+    const unsubAssignedLeads = onSnapshot(
+      query(collection(db, "leads"), where("assignedTo", "==", viewingUid), limit(1000)),
       (snap) => {
-        setLeadStats({ total: snap.size });
+        leadBuckets.set("assigned", new Set(snap.docs.map((leadDoc) => leadDoc.id)));
+        syncLeadStats();
       },
       (error: FirestoreError) => {
         if (error.code === "permission-denied") return;
-        console.error("Profile leads listener error", error);
+        console.error("Profile assigned leads listener error", error);
+      },
+    );
+    const unsubOwnerLeads = onSnapshot(
+      query(collection(db, "leads"), where("ownerUid", "==", viewingUid), limit(1000)),
+      (snap) => {
+        leadBuckets.set("owner", new Set(snap.docs.map((leadDoc) => leadDoc.id)));
+        syncLeadStats();
+      },
+      (error: FirestoreError) => {
+        if (error.code === "permission-denied") return;
+        console.error("Profile owner leads listener error", error);
       },
     );
     return () => {
       unsubTasks();
-      unsubLeads();
+      unsubAssignedLeads();
+      unsubOwnerLeads();
     };
   }, [viewingUid]);
 

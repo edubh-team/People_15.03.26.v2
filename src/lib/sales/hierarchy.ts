@@ -162,7 +162,29 @@ export function getEffectiveSalesHierarchyRole(
   user: RoleLike,
   now = new Date(),
 ): SalesHierarchyRole | null {
-  return normalizeSalesHierarchyRole(getEffectiveRoleSourceValue(user, now));
+  if (!user) return null;
+
+  const candidates: Array<string | null | undefined> = [];
+  if (isAssignmentActive(user.actingRoleUntil, now)) {
+    candidates.push(user.actingOrgRole ?? null);
+    candidates.push(user.actingRole ?? null);
+  }
+  candidates.push(user.orgRole ?? null);
+  candidates.push(user.role ?? null);
+
+  let bestRole: SalesHierarchyRole | null = null;
+  let bestRank = -1;
+  candidates.forEach((candidate) => {
+    const normalized = normalizeSalesHierarchyRole(candidate);
+    if (!normalized) return;
+    const rank = SALES_HIERARCHY_ORDER.indexOf(normalized);
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestRole = normalized;
+    }
+  });
+
+  return bestRole;
 }
 
 export function getSalesHierarchyRank(

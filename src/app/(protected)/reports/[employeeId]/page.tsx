@@ -7,14 +7,17 @@ import {
   where, 
   onSnapshot, 
   doc, 
-  writeBatch, 
-  serverTimestamp,
   getDocs,
   getDoc,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useParams } from "next/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { useScopedUsers } from "@/lib/hooks/useScopedUsers";
+import { canManageLeadAssignment, getAssignableLeadOwners } from "@/lib/crm/access";
+import { applyBulkLeadActions } from "@/lib/crm/bulk-actions";
+import { buildLeadActor } from "@/lib/crm/timeline";
 import { 
   BarChart, 
   Bar, 
@@ -76,6 +79,11 @@ type Metrics = {
 export default function EmployeeReportPage() {
   const params = useParams();
   const employeeId = params?.employeeId as string;
+  const { userDoc: currentUser } = useAuth();
+  const { users: scopedUsers } = useScopedUsers(currentUser, {
+    includeCurrentUser: true,
+    includeInactive: false,
+  });
   
   const [employee, setEmployee] = useState<UserDoc | null>(null);
   
@@ -116,20 +124,96 @@ export default function EmployeeReportPage() {
   const [unattendedLeads, setUnattendedLeads] = useState<LeadDoc[]>([]);
   const [allLeads, setAllLeads] = useState<LeadDoc[]>([]);
   const [targetAgent, setTargetAgent] = useState('');
-  const [subordinates, setSubordinates] = useState<UserDoc[]>([]);
+  const [shuffleReason, setShuffleReason] = useState("");
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [isShuffleModalOpen, setIsShuffleModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [portfolioPageSize, setPortfolioPageSize] = useState(25);
+  const [portfolioPage, setPortfolioPage] = useState(1);
+  const [unattendedPageSize, setUnattendedPageSize] = useState(25);
+  const [unattendedPage, setUnattendedPage] = useState(1);
   const [convertedLeads, setConvertedLeads] = useState<LeadDoc[]>([]);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const [taskLinkHealth, setTaskLinkHealth] = useState({ linked: 0, orphaned: 0, ownerMismatch: 0 });
+  const canShuffleLeads = canManageLeadAssignment(currentUser);
+  const subordinates = useMemo(
+    () =>
+      getAssignableLeadOwners(currentUser, scopedUsers).filter(
+        (user) => user.uid !== employeeId,
+      ),
+    [currentUser, employeeId, scopedUsers],
+  );
 
   const filteredLeads = useMemo(() => {
     if (statusFilter === 'all') return allLeads;
     return allLeads.filter(lead => (lead.status || 'new') === statusFilter);
   }, [allLeads, statusFilter]);
+  const totalPortfolioPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredLeads.length / portfolioPageSize)),
+    [filteredLeads.length, portfolioPageSize],
+  );
+  const pagedPortfolioLeads = useMemo(() => {
+    const start = (portfolioPage - 1) * portfolioPageSize;
+    return filteredLeads.slice(start, start + portfolioPageSize);
+  }, [filteredLeads, portfolioPage, portfolioPageSize]);
+  const totalUnattendedPages = useMemo(
+    () => Math.max(1, Math.ceil(unattendedLeads.length / unattendedPageSize)),
+    [unattendedLeads.length, unattendedPageSize],
+  );
+  const pagedUnattendedLeads = useMemo(() => {
+    const start = (unattendedPage - 1) * unattendedPageSize;
+    return unattendedLeads.slice(start, start + unattendedPageSize);
+  }, [unattendedLeads, unattendedPage, unattendedPageSize]);
+  const allVisibleUnattendedSelected = useMemo(
+    () =>
+      pagedUnattendedLeads.length > 0 &&
+      pagedUnattendedLeads.every((lead) => selectedLeads.has(lead.leadId)),
+    [pagedUnattendedLeads, selectedLeads],
+  );
+  const shuffleSubmitDisabled =
+    processing ||
+    !canShuffleLeads ||
+    !targetAgent ||
+    selectedLeads.size === 0 ||
+    !shuffleReason.trim();
+
+  useEffect(() => {
+    setPortfolioPage(1);
+  }, [employeeId, statusFilter, portfolioPageSize]);
+
+  useEffect(() => {
+    if (portfolioPage > totalPortfolioPages) {
+      setPortfolioPage(totalPortfolioPages);
+    }
+  }, [portfolioPage, totalPortfolioPages]);
+
+  useEffect(() => {
+    setUnattendedPage(1);
+  }, [employeeId, unattendedPageSize]);
+
+  useEffect(() => {
+    if (unattendedPage > totalUnattendedPages) {
+      setUnattendedPage(totalUnattendedPages);
+    }
+  }, [unattendedPage, totalUnattendedPages]);
+
+  useEffect(() => {
+    setSelectedLeads((current) => {
+      if (current.size === 0) return current;
+      const valid = new Set(unattendedLeads.map((lead) => lead.leadId));
+      const next = new Set(Array.from(current).filter((leadId) => valid.has(leadId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [unattendedLeads]);
+
+  useEffect(() => {
+    if (!targetAgent) return;
+    if (!subordinates.some((user) => user.uid === targetAgent)) {
+      setTargetAgent("");
+    }
+  }, [subordinates, targetAgent]);
 
   // 1. Fetch Employee Details
   useEffect(() => {
@@ -199,44 +283,27 @@ export default function EmployeeReportPage() {
     };
   }, [employeeId]);
 
-  // 2. Fetch Subordinates (for shuffle target)
-  useEffect(() => {
-    // Only fetch if we have the current user context (implementation omitted for brevity, assuming context exists)
-    // For now, let's fetch all active users who are not the current employee
-    const fetchSubordinates = async () => {
-      if (!db) return;
-      const q = query(
-        collection(db, 'users'), 
-        where('status', '==', 'active')
-      );
-      const snap = await getDocs(q);
-      const users = snap.docs
-        .map(d => ({ uid: d.id, ...d.data() } as UserDoc))
-        .filter(u => u.uid !== employeeId); // Exclude current employee
-      setSubordinates(users);
-    };
-    
-    fetchSubordinates();
-  }, [employeeId]);
-
-  // 3. Real-time Data Aggregation
+  // 2. Real-time Data Aggregation
   useEffect(() => {
     if (!employeeId || !db) return;
 
     const leadsRef = collection(db, 'leads');
     
     let assignedDocs: LeadDoc[] = [];
+    let ownerDocs: LeadDoc[] = [];
     let closedDocs: LeadDoc[] = [];
     let loadedAssigned = false;
+    let loadedOwner = false;
     let loadedClosed = false;
 
     // Helper to process merged leads
     const processLeads = () => {
-        if (!loadedAssigned || !loadedClosed) return;
+        if (!loadedAssigned || !loadedOwner || !loadedClosed) return;
 
         // Merge and Deduplicate
         const leadMap = new Map<string, LeadDoc>();
         assignedDocs.forEach(l => leadMap.set(l.leadId, l));
+        ownerDocs.forEach(l => leadMap.set(l.leadId, l));
         closedDocs.forEach(l => leadMap.set(l.leadId, l));
         const leads = Array.from(leadMap.values());
 
@@ -360,9 +427,17 @@ export default function EmployeeReportPage() {
         processLeads();
     });
 
-    // Query 2: Closed By
-    const q2 = query(leadsRef, where('closedBy.uid', '==', employeeId));
+    // Query 2: Owner Uid
+    const q2 = query(leadsRef, where('ownerUid', '==', employeeId));
     const unsub2 = onSnapshot(q2, (snapshot) => {
+        ownerDocs = snapshot.docs.map(d => ({ ...d.data(), leadId: d.id } as LeadDoc));
+        loadedOwner = true;
+        processLeads();
+    });
+
+    // Query 3: Closed By
+    const q3 = query(leadsRef, where('closedBy.uid', '==', employeeId));
+    const unsub3 = onSnapshot(q3, (snapshot) => {
         closedDocs = snapshot.docs.map(d => ({ ...d.data(), leadId: d.id } as LeadDoc));
         loadedClosed = true;
         processLeads();
@@ -371,63 +446,101 @@ export default function EmployeeReportPage() {
     return () => {
         unsub1();
         unsub2();
+        unsub3();
     };
   }, [employeeId]);
 
   // 4. Shuffle Logic
   const handleSelectAll = () => {
-    if (selectedLeads.size === unattendedLeads.length) {
-      setSelectedLeads(new Set());
-    } else {
-      setSelectedLeads(new Set(unattendedLeads.map(l => l.leadId)));
-    }
+    const visibleIds = pagedUnattendedLeads.map((lead) => lead.leadId);
+    setSelectedLeads((current) => {
+      const next = new Set(current);
+      const allVisibleSelected = visibleIds.every((leadId) => next.has(leadId));
+      if (allVisibleSelected) {
+        visibleIds.forEach((leadId) => next.delete(leadId));
+      } else {
+        visibleIds.forEach((leadId) => next.add(leadId));
+      }
+      return next;
+    });
   };
 
   const handleToggleLead = (id: string) => {
-    const next = new Set(selectedLeads);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedLeads(next);
+    setSelectedLeads((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const handleShuffleLeads = async () => {
-    if (!targetAgent || selectedLeads.size === 0 || !db) return;
+    if (!targetAgent || selectedLeads.size === 0 || !db || !currentUser) return;
+    if (!canShuffleLeads) {
+      alert("Only manager-level roles can reassign leads.");
+      return;
+    }
+    if (!subordinates.some((user) => user.uid === targetAgent)) {
+      alert("Choose an assignee from your reporting scope.");
+      return;
+    }
+    const reason = shuffleReason.trim();
+    if (!reason) {
+      alert("Transfer reason is required.");
+      return;
+    }
+
+    const selected = unattendedLeads.filter((lead) => selectedLeads.has(lead.leadId));
+    if (selected.length === 0) {
+      alert("No unattended leads selected.");
+      return;
+    }
+
     setProcessing(true);
 
     try {
-      const batch = writeBatch(db);
-      
-      selectedLeads.forEach(leadId => {
-        if (!db) return;
-        const leadRef = doc(db, 'leads', leadId);
-        batch.update(leadRef, {
-          assignedTo: targetAgent,
-          assignedBy: 'system_shuffle', // Or current user ID
-          status: 'new', // Reset status for new agent
-          assignedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          history: [{ // Add audit log
-            action: 'shuffled',
-            oldStatus: 'new',
-            newStatus: 'new',
-            remarks: `Re-assigned from ${employee?.name || 'previous agent'} to new agent due to inactivity`,
-            updatedBy: 'system',
-            timestamp: new Date().toISOString() // using ISO string for consistency with type definition
-          }]
-        });
+      const actor = buildLeadActor({
+        uid: currentUser.uid,
+        displayName: currentUser.displayName ?? currentUser.name ?? null,
+        email: currentUser.email ?? null,
+        role: currentUser.role ?? null,
+        orgRole: currentUser.orgRole ?? null,
+        employeeId: currentUser.employeeId ?? null,
       });
-
-      await batch.commit();
+      const result = await applyBulkLeadActions({
+        leads: selected,
+        actor,
+        assignTo: targetAgent,
+        status: "new",
+        remarks: `Unattended lead shuffle from ${employee?.name ?? employeeId}`,
+        transferReason: reason,
+      });
       
       // Reset UI
       setSelectedLeads(new Set());
       setTargetAgent('');
+      setShuffleReason("");
       setIsShuffleModalOpen(false);
-      // Ideally show a toast here
-      alert(`Successfully shuffled ${selectedLeads.size} leads.`);
+      if (result.writeFailures.length > 0 || result.sideEffectFailures.length > 0) {
+        alert(
+          [
+            `Updated ${result.updated} lead${result.updated === 1 ? "" : "s"}.`,
+            result.writeFailures.length > 0
+              ? `${result.writeFailures.length} write failure${result.writeFailures.length === 1 ? "" : "s"}`
+              : null,
+            result.sideEffectFailures.length > 0
+              ? `${result.sideEffectFailures.length} sync failure${result.sideEffectFailures.length === 1 ? "" : "s"}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" | "),
+        );
+      } else {
+        alert(`Successfully shuffled ${result.updated} lead${result.updated === 1 ? "" : "s"}.`);
+      }
     } catch (error) {
       console.error("Shuffle failed:", error);
-      alert("Failed to shuffle leads. Please try again.");
+      alert(error instanceof Error ? error.message : "Failed to shuffle leads. Please try again.");
     } finally {
       setProcessing(false);
     }
@@ -765,6 +878,7 @@ export default function EmployeeReportPage() {
            <div className="flex items-center gap-4">
              <h3 className="text-lg font-bold text-gray-900">Assigned Portfolio & Remarks</h3>
              <span className="text-xs font-medium bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{filteredLeads.length} / {allLeads.length}</span>
+             <span className="text-xs font-medium bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full">Page {portfolioPage} of {totalPortfolioPages}</span>
            </div>
            
            <div className="flex items-center gap-2">
@@ -807,7 +921,7 @@ export default function EmployeeReportPage() {
                     </td>
                  </tr>
                ) : (
-                 filteredLeads.map((lead) => ( 
+                 pagedPortfolioLeads.map((lead) => ( 
                    <tr key={lead.leadId} className="hover:bg-gray-50/80 transition-colors"> 
                      
                      {/* Lead Info */} 
@@ -849,7 +963,41 @@ export default function EmployeeReportPage() {
              </tbody> 
            </table>
          </div>
-         {/* Pagination or load more could go here */}
+         {filteredLeads.length > 0 ? (
+           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-6 py-3 text-sm">
+             <div className="text-gray-500">
+               Showing {pagedPortfolioLeads.length} of {filteredLeads.length} filtered leads
+             </div>
+             <div className="flex items-center gap-2">
+               <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Rows</label>
+               <select
+                 value={portfolioPageSize}
+                 onChange={(event) => setPortfolioPageSize(Number(event.target.value))}
+                 className="rounded-lg border-gray-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+               >
+                 <option value={15}>15</option>
+                 <option value={25}>25</option>
+                 <option value={50}>50</option>
+               </select>
+               <button
+                 type="button"
+                 onClick={() => setPortfolioPage((current) => Math.max(1, current - 1))}
+                 disabled={portfolioPage === 1}
+                 className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+               >
+                 Prev
+               </button>
+               <button
+                 type="button"
+                 onClick={() => setPortfolioPage((current) => Math.min(totalPortfolioPages, current + 1))}
+                 disabled={portfolioPage === totalPortfolioPages}
+                 className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+               >
+                 Next
+               </button>
+             </div>
+           </div>
+         ) : null}
       </div>
 
       {/* ACTION ZONE: Unattended Leads Redistribution */}
@@ -859,12 +1007,17 @@ export default function EmployeeReportPage() {
             <div className="flex items-center gap-2">
                <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse"></div>
                <h3 className="text-lg font-bold text-gray-900">Unattended Leads ({unattendedLeads.length})</h3>
+               {unattendedLeads.length > 0 ? (
+                 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                   Page {unattendedPage} of {totalUnattendedPages}
+                 </span>
+               ) : null}
             </div>
             <p className="text-sm text-gray-500 mt-1">Stagnant leads (Status: &apos;New&apos; & No activity for 7+ days). <span className="text-indigo-600 font-medium cursor-pointer hover:underline">View Policy</span></p>
           </div>
           
           {/* SHUFFLE CONTROLS */}
-          {unattendedLeads.length > 0 && (
+          {unattendedLeads.length > 0 && canShuffleLeads && (
             <div className="flex gap-3 items-center">
                <span className="text-sm text-gray-500 font-medium">
                   {selectedLeads.size} selected
@@ -884,6 +1037,11 @@ export default function EmployeeReportPage() {
                </button>
             </div>
           )}
+          {unattendedLeads.length > 0 && !canShuffleLeads ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800">
+              Only manager-level roles can shuffle leads.
+            </div>
+          ) : null}
         </div>
 
         {/* TABLE OF STAGNANT LEADS */}
@@ -895,7 +1053,7 @@ export default function EmployeeReportPage() {
                   <input 
                     type="checkbox" 
                     className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    checked={unattendedLeads.length > 0 && selectedLeads.size === unattendedLeads.length}
+                    checked={allVisibleUnattendedSelected}
                     onChange={handleSelectAll}
                   />
                 </th>
@@ -914,7 +1072,7 @@ export default function EmployeeReportPage() {
                     </td>
                  </tr>
               ) : (
-                unattendedLeads.map((lead) => {
+                pagedUnattendedLeads.map((lead) => {
                   // Calculate wait time
                   const assignedDate = lead.assignedAt 
                      ? (lead.assignedAt instanceof Timestamp ? lead.assignedAt.toDate() : new Date(lead.assignedAt as string))
@@ -963,11 +1121,52 @@ export default function EmployeeReportPage() {
             </tbody>
           </table>
         </div>
+        {unattendedLeads.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-6 py-3 text-sm">
+            <div className="text-gray-500">
+              Showing {pagedUnattendedLeads.length} of {unattendedLeads.length} unattended leads
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Rows</label>
+              <select
+                value={unattendedPageSize}
+                onChange={(event) => setUnattendedPageSize(Number(event.target.value))}
+                className="rounded-lg border-gray-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              >
+                <option value={15}>15</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setUnattendedPage((current) => Math.max(1, current - 1))}
+                disabled={unattendedPage === 1}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setUnattendedPage((current) => Math.min(totalUnattendedPages, current + 1))}
+                disabled={unattendedPage === totalUnattendedPages}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* SHUFFLE MODAL */}
       <Transition show={isShuffleModalOpen} as={Fragment}>
-        <Dialog onClose={() => setIsShuffleModalOpen(false)} className="relative z-50">
+        <Dialog
+          onClose={() => {
+            setIsShuffleModalOpen(false);
+            setShuffleReason("");
+          }}
+          className="relative z-50"
+        >
           <TransitionChild
             as={Fragment}
             enter="ease-out duration-300"
@@ -1008,22 +1207,40 @@ export default function EmployeeReportPage() {
                       >
                         <option value="">Choose an agent...</option>
                         {subordinates.map(sub => (
-                           <option key={sub.uid} value={sub.uid}>{sub.name} ({sub.role})</option>
+                           <option key={sub.uid} value={sub.uid}>
+                             {sub.displayName ?? sub.name ?? sub.email ?? sub.uid} ({sub.orgRole ?? sub.role ?? "user"})
+                           </option>
                         ))}
                       </select>
+                   </div>
+                   <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Transfer reason</label>
+                      <textarea
+                        rows={3}
+                        value={shuffleReason}
+                        onChange={(event) => setShuffleReason(event.target.value)}
+                        className="w-full rounded-xl border-gray-200 bg-gray-50 p-3 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        placeholder="Why are these leads being reassigned?"
+                      />
+                      {!shuffleReason.trim() ? (
+                        <p className="mt-2 text-xs text-amber-700">Transfer reason is mandatory.</p>
+                      ) : null}
                    </div>
                 </div>
 
                 <div className="mt-8 flex justify-end gap-3">
                   <button 
-                    onClick={() => setIsShuffleModalOpen(false)}
+                    onClick={() => {
+                      setIsShuffleModalOpen(false);
+                      setShuffleReason("");
+                    }}
                     className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl transition-colors"
                   >
                     Cancel
                   </button>
                   <button 
                     onClick={handleShuffleLeads}
-                    disabled={!targetAgent || processing}
+                    disabled={shuffleSubmitDisabled}
                     className="px-6 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg shadow-indigo-200 transition-all disabled:opacity-50 disabled:shadow-none"
                   >
                     {processing ? 'Processing...' : 'Confirm Transfer'}

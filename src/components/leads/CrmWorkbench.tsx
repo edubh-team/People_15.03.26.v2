@@ -516,6 +516,7 @@ export function CrmWorkbench({
   const [bulkAssignMessage, setBulkAssignMessage] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const lastFocusedLeadIdRef = useRef<string | null>(null);
+  const appliedSelectionTokenRef = useRef<string | null>(null);
 
   const activeSmartView = useMemo(() => smartViews.find((view) => view.id === activeSmartViewId) ?? null, [activeSmartViewId, smartViews]);
   const ownedActiveSmartView = activeSmartView?.ownerUid === currentUser.uid ? activeSmartView : null;
@@ -593,7 +594,11 @@ export function CrmWorkbench({
   }, [clock, currentUser, didInitSelection, filters, initialLayout, initialTab, leads, loading, selectionToken, smartViews, smartViewsLoading, tabs]);
 
   useEffect(() => {
-    if (!selectionToken) return;
+    if (!selectionToken) {
+      appliedSelectionTokenRef.current = null;
+      return;
+    }
+    if (appliedSelectionTokenRef.current === selectionToken) return;
     if (!initialTab && loading) return;
     const resetTab =
       initialTab && tabs.some((tab) => tab.id === initialTab)
@@ -606,6 +611,7 @@ export function CrmWorkbench({
     setFilters(getDefaultWorkbenchFilters());
     setActiveTab(resetTab);
     setLayoutMode(initialLayout);
+    appliedSelectionTokenRef.current = selectionToken;
   }, [clock, currentUser, initialLayout, initialTab, leads, loading, selectionToken, tabs]);
 
   useEffect(() => {
