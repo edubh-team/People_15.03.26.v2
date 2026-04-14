@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { useAuth } from "@/components/auth/AuthProvider";
+import EmployeePayslipsPanel from "@/components/payroll/EmployeePayslipsPanel";
 import { getTodayKey } from "@/lib/firebase/attendance";
 import {
   useCheckIn,
@@ -236,6 +237,8 @@ export default function EmployeePage() {
             )}
           </div>
         </div>
+
+        <EmployeePayslipsPanel uid={uid} title="Payslips" />
       </div>
     </AuthGate>
   );

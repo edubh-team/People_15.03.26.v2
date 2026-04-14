@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Auth } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
-import { canAccessFinance, canCreateUsers, canManageTeam } from "@/lib/access";
+import { canAccessFinance, canCreateUsers, canManageTeam, isAdminUser, isHrUser } from "@/lib/access";
 import { getAdmin } from "@/lib/firebase/admin";
 import { readCookieValue } from "@/lib/session";
 import { decodeSessionCookieValue } from "@/lib/server/session";
@@ -112,6 +112,23 @@ export async function requireUserCreationRequestUser(
       ok: false,
       response: NextResponse.json(
         { error: "Forbidden: User creation access only" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return verified;
+}
+
+export async function requirePayrollRequestUser(req: Request): Promise<VerificationResult> {
+  const verified = await verifyBearerRequest(req);
+  if (!verified.ok) return verified;
+
+  if (!isHrUser(verified.value.userDoc) && !isAdminUser(verified.value.userDoc)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Forbidden: Payroll access only" },
         { status: 403 },
       ),
     };

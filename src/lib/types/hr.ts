@@ -33,16 +33,52 @@ export interface LeaveRequest {
   updatedAt?: Timestamp | Date;
 }
 
+export interface PayrollLineItem {
+  label: string;
+  amount: number;
+}
+
+export interface PayrollEarningsBreakdown {
+  basicSalary: number;
+  studyAllowance: number;
+  bonus: number;
+  hra: number;
+}
+
+export interface PayrollDeductionsBreakdown {
+  lop: number;
+  professionalTax: number;
+  pf: number;
+  insurance: number;
+}
+
+export interface AttendancePayrollSummary {
+  employeeId: string;
+  uid: string;
+  month: string;
+  daysPresent: number;
+  daysAbsent: number;
+  lateCount: number;
+  leavesApproved: number;
+}
+
 export interface Payroll {
   id: string; // {uid}_{month_year}
   uid: string;
   month: string; // YYYY-MM
+  employeeId?: string;
+  designation?: string;
+  department?: string;
+  joiningDate?: string | null;
+  basicSalary?: number;
   baseSalary: number;
   daysPresent: number;
   daysAbsent: number;
   lates: number;
+  lateCount?: number;
   incentives: number;
   bonus?: number; // Added for manual bonus
+  bonuses?: number;
   commissionPercentage?: number; // % of sales volume
   totalSalesVolume?: number; // Snapshot of sales volume for this payroll
   deductions: number;
@@ -59,7 +95,15 @@ export interface Payroll {
   attendanceCorrectionPendingCount?: number;
   attendanceCorrectionReasons?: string[];
   attendanceCorrectionSummary?: string | null;
+  grossSalary?: number;
+  netPay?: number;
   netSalary: number;
+  paymentPeriodStart?: string | null;
+  paymentPeriodEnd?: string | null;
+  paymentDate?: string | null;
+  earnings?: PayrollEarningsBreakdown | PayrollLineItem[];
+  deductionBreakdown?: PayrollDeductionsBreakdown;
+  deductionItems?: PayrollLineItem[];
   status: "GENERATED" | "PAID" | "PENDING_CREATION";
   payslipUrl?: string;
   generatedAt: Timestamp | Date;

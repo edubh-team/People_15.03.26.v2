@@ -73,6 +73,10 @@ export type UserDoc = {
   employeeId?: string | null;
   email: string | null;
   displayName: string | null;
+  designation?: string | null;
+  department?: string | null;
+  joiningDate?: unknown;
+  salary?: number | null;
   photoURL?: string | null;
   name?: string | null;
   phone: string | null;
@@ -149,6 +153,37 @@ export type UserDoc = {
     base: number;
     bonusRate: number;
     deductionRate: number;
+    hra?: number;
+    studyAllowance?: number;
+    professionalTax?: number;
+    pf?: number;
+    insurance?: number;
+    earnings?: Array<{
+      label: string;
+      amount: number;
+    }>;
+    deductions?: Array<{
+      label: string;
+      amount: number;
+    }>;
+  } | null;
+  payroll?: {
+    baseSalary?: number;
+    allowances?: {
+      hra?: number;
+      travel?: number;
+      bonus?: number;
+    } | null;
+    deductions?: {
+      professionalTax?: number;
+      pf?: number;
+      insurance?: number;
+    } | null;
+    taxRegime?: "OLD_REGIME" | "NEW_REGIME" | null;
+    bankDetails?: {
+      accountNumber?: string | null;
+      ifsc?: string | null;
+    } | null;
   } | null;
   onboardingCompleted?: boolean;
   onboardingTimestamp?: unknown;

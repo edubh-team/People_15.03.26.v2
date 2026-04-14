@@ -7,6 +7,7 @@ import {
   buildMonthlyApprovedLeaveSummaryByUser,
   calculateMonthlyLeaveDeduction,
 } from "@/lib/attendance/leave-policy";
+import { getDefaultPayrollCycle } from "@/lib/payroll/payslip";
 import { Payroll } from "@/lib/types/hr";
 import { sendEmail } from "@/lib/email";
 import { isClosedLeadStatus } from "@/lib/leads/status";
@@ -943,9 +944,13 @@ export async function updatePayroll(
   payrollId: string,
   updates: {
     baseSalary: number;
+    studyAllowance: number;
+    hra: number;
     bonus: number;
-    deductions: number;
-    commissionPercentage: number;
+    lop: number;
+    professionalTax: number;
+    pf: number;
+    insurance: number;
   },
   callerIdToken: string,
   createIfMissing?: {
@@ -981,6 +986,8 @@ export async function updatePayroll(
         if (!userSnap.exists) throw new Error("User not found");
         const userData = userSnap.data();
 
+        const payrollCycle = getDefaultPayrollCycle(createIfMissing.month);
+
         // Calculate Attendance Stats (Reused Logic)
         const [year, month] = createIfMissing.month.split("-").map(Number);
         const mm = String(month).padStart(2, "0");
@@ -1007,7 +1014,9 @@ export async function updatePayroll(
             id: payrollId,
             uid: createIfMissing.uid,
             month: createIfMissing.month,
+            employeeId: userData?.employeeId || createIfMissing.uid,
             baseSalary: updates.baseSalary, // Use provided update
+            basicSalary: updates.baseSalary,
             daysPresent,
             daysAbsent: 30 - daysPresent,
             lates,
@@ -1018,76 +1027,72 @@ export async function updatePayroll(
             generatedAt: new Date(),
             userDisplayName: userData?.displayName,
             userEmail: userData?.email,
-            commissionPercentage: 0,
+            designation: userData?.designation,
+            department: userData?.department,
             bonus: 0,
-            totalSalesVolume: 0
+            bonuses: 0,
+            totalSalesVolume: 0,
+            paymentPeriodStart: payrollCycle?.start ?? null,
+            paymentPeriodEnd: payrollCycle?.end ?? null,
+            paymentDate: payrollCycle?.paymentDate ?? null,
         };
     } else {
         payroll = payrollSnap.data() as Payroll;
     }
 
-    // 3. Calculate Sales Volume
-    let totalSalesVolume = 0;
-    
-    // Parse month (YYYY-MM)
-    const [year, month] = payroll.month.split("-").map(Number);
-    // Start of month
-    const start = new Date(year, month - 1, 1);
-    // End of month
-    const end = new Date(year, month, 0, 23, 59, 59);
+    const payrollCycle = getDefaultPayrollCycle(payroll.month);
+    const totalEarnings =
+      (updates.baseSalary || 0) +
+      (updates.studyAllowance || 0) +
+      (updates.bonus || 0) +
+      (updates.hra || 0);
+    const totalDeductions =
+      (updates.lop || 0) +
+      (updates.professionalTax || 0) +
+      (updates.pf || 0) +
+      (updates.insurance || 0);
+    const netSalary = Math.max(0, totalEarnings - totalDeductions);
 
-    // Fetch closed leads for this user
-    // Note: We check both assignedTo and ownerUid to be safe, or just assignedTo
-    // Using assignedTo is safer for current ownership
-    const leadsSnap = await adminDb.collection("leads")
-        .where("assignedTo", "==", payroll.uid)
-        .where("status", "==", "closed")
-        .get();
-
-    leadsSnap.forEach(doc => {
-        const d = doc.data();
-        // Determine closure date logic: closedAt -> updatedAt -> createdAt
-        const ts = d.enrollmentDetails?.closedAt || d.closedAt || d.updatedAt || d.createdAt;
-        let date: Date | null = null;
-        
-        if (ts && typeof ts.toDate === 'function') {
-            date = ts.toDate();
-        } else if (ts) {
-            date = new Date(ts);
-        }
-
-        if (date && date >= start && date <= end) {
-             // Amount logic: courseFees -> amount -> fee
-             const amt = Number(d.courseFees || d.amount || d.enrollmentDetails?.fee || 0);
-             totalSalesVolume += amt;
-        }
-    });
-
-    // 4. Calculate Incentive
-    let incentives = 0;
-    if (updates.commissionPercentage > 0) {
-        incentives = totalSalesVolume * (updates.commissionPercentage / 100);
+    if ((updates.baseSalary || 0) <= 0) {
+        throw new Error("Basic salary must be greater than 0.");
     }
 
-    // 5. Calculate Net (If creating new, use daysPresent logic for base calculation??)
-    // Actually, if we are updating baseSalary, we should probably re-calculate the pro-rated salary if it's based on attendance?
-    // The current logic in generatePayroll is: salary = (base / 30) * daysPresent.
-    // But here in updatePayroll, we seem to take baseSalary as the *fixed* amount or *gross*?
-    // Let's stick to the existing update logic: net = base + bonus + incentives - deductions.
-    // This implies that when editing, the "baseSalary" field becomes the "Actual Payable Base" rather than "Gross Annual/Monthly Base".
-    // This is a common pattern: Generate calculates the payable base, and Edit overrides it.
-    
-    const netSalary = (updates.baseSalary || 0) + (updates.bonus || 0) + incentives - (updates.deductions || 0);
+    if (totalDeductions > totalEarnings) {
+        throw new Error("Total deductions cannot be greater than total earnings.");
+    }
 
     const updatedData = {
         ...payroll,
         baseSalary: updates.baseSalary,
+        basicSalary: updates.baseSalary,
         bonus: updates.bonus,
-        deductions: updates.deductions,
-        commissionPercentage: updates.commissionPercentage,
-        totalSalesVolume,
-        incentives,
-        netSalary: Math.round(netSalary),
+        bonuses: updates.bonus,
+        incentives: updates.bonus,
+        deductions: Math.max(0, Math.round(totalDeductions)),
+        grossSalary: Math.max(0, Math.round(totalEarnings)),
+        netPay: Math.max(0, Math.round(netSalary)),
+        netSalary: Math.max(0, Math.round(netSalary)),
+        earnings: {
+            basicSalary: Math.max(0, Math.round(updates.baseSalary || 0)),
+            studyAllowance: Math.max(0, Math.round(updates.studyAllowance || 0)),
+            bonus: Math.max(0, Math.round(updates.bonus || 0)),
+            hra: Math.max(0, Math.round(updates.hra || 0)),
+        },
+        deductionBreakdown: {
+            lop: Math.max(0, Math.round(updates.lop || 0)),
+            professionalTax: Math.max(0, Math.round(updates.professionalTax || 0)),
+            pf: Math.max(0, Math.round(updates.pf || 0)),
+            insurance: Math.max(0, Math.round(updates.insurance || 0)),
+        },
+        deductionItems: [
+            { label: "LOP (Loss of Pay)", amount: Math.max(0, Math.round(updates.lop || 0)) },
+            { label: "Professional Tax", amount: Math.max(0, Math.round(updates.professionalTax || 0)) },
+            { label: "PF", amount: Math.max(0, Math.round(updates.pf || 0)) },
+            { label: "Health Insurance", amount: Math.max(0, Math.round(updates.insurance || 0)) },
+        ],
+        paymentPeriodStart: payroll.paymentPeriodStart || payrollCycle?.start || null,
+        paymentPeriodEnd: payroll.paymentPeriodEnd || payrollCycle?.end || null,
+        paymentDate: payroll.paymentDate || payrollCycle?.paymentDate || null,
         updatedAt: new Date()
     };
 

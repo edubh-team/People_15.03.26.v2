@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
-
+import EmployeePayslipsPanel from "@/components/payroll/EmployeePayslipsPanel";
 import { RoleBadge } from "@/components/RoleBadge";
 
 export default function ProfilePage() {
@@ -49,6 +49,8 @@ export default function ProfilePage() {
           <div>UID: {firebaseUser?.uid}</div>
           {userDoc?.employeeId && <div>Employee ID: {userDoc.employeeId}</div>}
           <div>Email: {firebaseUser?.email ?? "—"}</div>
+          {userDoc?.designation ? <div>Designation: {userDoc.designation}</div> : null}
+          {userDoc?.department ? <div>Department: {userDoc.department}</div> : null}
           <div className="flex items-center gap-2">Role: <RoleBadge role={userDoc?.role || "employee"} /></div>
           <div>Status: {userDoc?.status ?? "—"}</div>
         </div>
@@ -105,6 +107,8 @@ export default function ProfilePage() {
           </div>
         </form>
       </div>
+
+      <EmployeePayslipsPanel uid={firebaseUser?.uid ?? null} />
     </div>
   );
 }
