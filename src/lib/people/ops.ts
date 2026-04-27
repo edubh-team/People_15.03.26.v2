@@ -15,6 +15,10 @@ import {
   writeBatch,
   where,
 } from "firebase/firestore";
+import {
+  isPresentAttendanceStatus,
+  normalizeAttendanceStatus,
+} from "@/lib/attendance/status";
 import { db } from "@/lib/firebase/client";
 import {
   isAdminUser,
@@ -95,19 +99,13 @@ export type PeopleOpsSnapshot = {
 };
 
 function isPresentStatus(status: string | undefined | null) {
-  const normalized = (status ?? "").toLowerCase();
-  return (
-    normalized === "present" ||
-    normalized === "checked_in" ||
-    normalized === "checked_out" ||
-    normalized === "on_break"
-  );
+  return isPresentAttendanceStatus(status);
 }
 
 function isLateRecord(record: HrAttendanceRecord | undefined) {
   if (!record) return false;
   if (record.late === true) return true;
-  return (record.dayStatus ?? "").toLowerCase() === "late";
+  return normalizeAttendanceStatus(record.dayStatus) === "late";
 }
 
 function toDateKey(now = new Date()) {
@@ -234,6 +232,60 @@ function resolveAttendanceStatusPatch(input: {
     checkedOutAt: null,
     checkOutTime: null,
   } as const;
+}
+
+async function syncTodayPresenceFromAttendanceRecord(
+  firestore: NonNullable<typeof db>,
+  uid: string,
+  dateKey: string,
+  patch: Record<string, unknown>,
+) {
+  const today = toDateKey();
+  if (!uid || dateKey !== today) return;
+
+  const normalizedPatch: Record<string, unknown> = {
+    uid,
+    dateKey,
+    updatedAt: new Date(),
+  };
+
+  const read = (primary: string, fallback?: string) => {
+    if (Object.prototype.hasOwnProperty.call(patch, primary)) {
+      return patch[primary];
+    }
+    if (fallback && Object.prototype.hasOwnProperty.call(patch, fallback)) {
+      return patch[fallback];
+    }
+    return undefined;
+  };
+
+  const status = read("status");
+  const dayStatus = read("dayStatus");
+  if (typeof status !== "undefined") normalizedPatch.status = status;
+  if (typeof dayStatus !== "undefined") normalizedPatch.dayStatus = dayStatus;
+
+  const checkedInAt = read("checkedInAt", "checkInTime");
+  const checkedOutAt = read("checkedOutAt", "checkOutTime");
+  if (typeof checkedInAt !== "undefined") normalizedPatch.checkedInAt = checkedInAt ?? null;
+  if (typeof checkedOutAt !== "undefined") normalizedPatch.checkedOutAt = checkedOutAt ?? null;
+
+  [
+    "manualUpdate",
+    "correctionStatus",
+    "correctionReason",
+    "correctionRequestedBy",
+    "correctionRequestedAt",
+    "correctionReviewedBy",
+    "correctionReviewedAt",
+    "correctionReviewReason",
+    "latestOverrideAuditId",
+  ].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      normalizedPatch[key] = patch[key];
+    }
+  });
+
+  await setDoc(doc(firestore, "presence", uid), normalizedPatch, { merge: true });
 }
 
 function normalizeLeaveStatus(status: string | undefined | null) {
@@ -504,6 +556,7 @@ export async function updateHrAttendanceRecord(input: {
     createdAt: now,
   });
   await batch.commit();
+  await syncTodayPresenceFromAttendanceRecord(firestore, input.uid, input.dateKey, payload);
 }
 
 export async function reviewHrAttendanceOverride(input: {
@@ -601,6 +654,21 @@ export async function reviewHrAttendanceOverride(input: {
     createdAt: now,
   });
   await batch.commit();
+  const livePatch =
+    nextStatus === "approved"
+      ? {
+          ...(data.nextSnapshot && typeof data.nextSnapshot === "object"
+            ? (data.nextSnapshot as Record<string, unknown>)
+            : {}),
+          ...patch,
+        }
+      : patch;
+  await syncTodayPresenceFromAttendanceRecord(
+    firestore,
+    typeof data.uid === "string" ? data.uid : "",
+    typeof data.dateKey === "string" ? data.dateKey : "",
+    livePatch,
+  );
 }
 
 export function useHrLeaveAuthority(currentUser: UserDoc | null, activeStatus: LeaveAuthorityTab) {

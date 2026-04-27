@@ -25,6 +25,15 @@ import {
   useApprovedLeaves,
 } from "@/lib/hooks/useAttendance";
 import { useAttendanceActions } from "@/lib/hooks/useAttendanceActions";
+import {
+  isOnLeaveAttendanceState,
+  isPresentAttendanceRecord,
+} from "@/lib/attendance/status";
+import {
+  calculateActiveMinutes,
+  getAttendancePunchCounts,
+  getAttendanceSessionCount,
+} from "@/lib/attendance-utils";
 import { getTodayKey } from "@/lib/firebase/attendance";
 import LeaveApplicationModal from "@/components/attendance/LeaveApplicationModal";
 
@@ -166,6 +175,9 @@ export default function AttendancePage() {
     geoStatus,
     lastLocation,
   } = useAttendanceActions(uid, todayPresence);
+  const todayWorkedMinutes = calculateActiveMinutes(todayPresence, clock);
+  const todaySessionCount = getAttendanceSessionCount(todayPresence);
+  const todayPunchCounts = getAttendancePunchCounts(todayPresence);
 
   useEffect(() => {
     const id = window.setInterval(() => setClock(new Date()), 1000);
@@ -202,9 +214,7 @@ export default function AttendancePage() {
   const presentDays = useMemo(() => {
     let count = 0;
     for (const d of monthAttendance.data ?? []) {
-      if (d.status === "on_leave") continue;
-      if (d.dayStatus === "on_leave") continue;
-      if (d.status === "checked_in" || d.status === "checked_out") count += 1;
+      if (isPresentAttendanceRecord(d)) count += 1;
     }
     return count;
   }, [monthAttendance.data]);
@@ -214,7 +224,7 @@ export default function AttendancePage() {
   const ytdWorkedDays = useMemo(() => {
     let count = 0;
     for (const d of yearAttendance.data ?? []) {
-      if (d.status === "checked_in" || d.status === "checked_out") count += 1;
+      if (isPresentAttendanceRecord(d)) count += 1;
     }
     return count;
   }, [yearAttendance.data]);
@@ -380,7 +390,15 @@ export default function AttendancePage() {
                 <div className="grid gap-4">
                   <button
                     type="button"
-                    disabled={!uid || isBusy || geoStatus === "denied"}
+                    disabled={
+                      !uid ||
+                      isBusy ||
+                      (
+                        todayPresence?.status !== "checked_in" &&
+                        todayPresence?.status !== "on_break" &&
+                        geoStatus === "denied"
+                      )
+                    }
                     onClick={handlePrimaryAction}
                     className={`group relative flex h-20 w-full items-center justify-center gap-3 rounded-2xl text-lg font-bold shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-70 ${
                       todayPresence?.status === "checked_in" || todayPresence?.status === "on_break"
@@ -460,6 +478,24 @@ export default function AttendancePage() {
                     <span className="text-slate-500">Punch Out</span>
                     <span className="font-mono font-medium text-slate-700">
                       {formatMaybeTimestamp(todayPresence?.checkedOutAt) ?? "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Sessions</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {todaySessionCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Punch Count</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {todayPunchCounts.checkIns} in / {todayPunchCounts.checkOuts} out
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Worked Today</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {`${Math.floor(todayWorkedMinutes / 60)}h ${todayWorkedMinutes % 60}m`}
                     </span>
                   </div>
                 </div>
@@ -572,12 +608,13 @@ export default function AttendancePage() {
                       const isLeave = leaveKeys.has(key);
                       const day = attendanceByKey.get(key) ?? null;
                       const isLate = day?.dayStatus === "late";
-                      const isPresent = Boolean(day && (day.status === "checked_in" || day.status === "checked_out"));
+                      const isPresent = isPresentAttendanceRecord(day);
                       const showAbsent =
                         inMonth &&
                         isWeekday(d) &&
                         !isHoliday &&
                         !isLeave &&
+                        !isOnLeaveAttendanceState(day?.status, day?.dayStatus) &&
                         !isPresent &&
                         d.getTime() <= new Date().getTime();
 
@@ -669,11 +706,12 @@ export default function AttendancePage() {
                       const isLeave = leaveKeys.has(key);
                       const rec = attendanceByKey.get(key) ?? null;
                       const isLate = rec?.dayStatus === "late";
-                      const isPresent = Boolean(rec && (rec.status === "checked_in" || rec.status === "checked_out"));
+                      const isPresent = isPresentAttendanceRecord(rec);
                       const isAbsent =
                         isWeekday(d) &&
                         !isHoliday &&
                         !isLeave &&
+                        !isOnLeaveAttendanceState(rec?.status, rec?.dayStatus) &&
                         !isPresent &&
                         d.getTime() <= new Date().getTime();
 

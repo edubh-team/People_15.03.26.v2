@@ -30,6 +30,20 @@ export type AttendanceRecord = {
   daysAbsent: number;
   lateCount: number;
   leavesApproved: number;
+  paidLeaveDays: number;
+  leaveAllowanceDays: number;
+  leaveExcessDays: number;
+  unpaidLeaveDays: number;
+  totalWorkingDays: number;
+  payableDays: number;
+  attendanceTrackedDays: number;
+  explicitAbsentDays: number;
+  totalWorkedMinutes: number;
+  totalSessions: number;
+  attendanceCorrectionCount: number;
+  attendanceCorrectionPendingCount: number;
+  attendanceCorrectionReasons: string[];
+  attendanceCorrectionSummary: string | null;
 };
 
 export type GeneratePayrollRequest = {

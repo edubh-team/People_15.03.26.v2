@@ -2,9 +2,12 @@ import "server-only";
 
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { normalizeRoleValue } from "@/lib/access";
-import { buildMonthlyApprovedLeaveSummaryByUser } from "@/lib/attendance/leave-policy";
 import { getDefaultPayrollCycle, normalizePayrollRecord } from "@/lib/payroll/payslip";
-import type { AttendanceDayDoc, LeaveRequestDoc } from "@/lib/types/attendance";
+import {
+  getPayrollMonthWindow,
+  loadPayrollAttendanceSummary,
+  PAYROLL_MONTH_DAYS,
+} from "@/lib/server/payroll-attendance";
 import type { Payroll, PayrollLineItem } from "@/lib/types/hr";
 import type {
   AttendanceRecord,
@@ -16,8 +19,6 @@ import type {
   PayrollListResponse,
 } from "@/lib/types/payroll";
 import type { UserDoc } from "@/lib/types/user";
-
-const PAYROLL_MONTH_DAYS = 30;
 
 export class PayrollServiceError extends Error {
   status: number;
@@ -94,24 +95,6 @@ function formatIsoDate(value: unknown): string | null {
   }
 
   return null;
-}
-
-function getMonthWindow(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const start = new Date(Date.UTC(year, monthNumber - 1, 1));
-  const end = new Date(Date.UTC(year, monthNumber, 0));
-  const startKey = `${month}-01`;
-  const endKey = `${month}-${String(end.getUTCDate()).padStart(2, "0")}`;
-
-  return {
-    year: String(year),
-    monthNumber,
-    monthToken: String(monthNumber).padStart(2, "0"),
-    start,
-    end,
-    startKey,
-    endKey,
-  };
 }
 
 function getDisplayName(user: UserDoc) {
@@ -353,85 +336,26 @@ async function resolveEmployeeByKey(adminDb: Firestore, employeeKey: string) {
   } satisfies UserDoc;
 }
 
-async function loadApprovedLeaves(adminDb: Firestore, uid: string, month: string) {
-  const { start, end } = getMonthWindow(month);
-  const snap = await adminDb
-    .collection("leaveRequests")
-    .where("uid", "==", uid)
-    .where("status", "==", "approved")
-    .get();
-
-  return snap.docs
-    .map((row) => row.data() as LeaveRequestDoc)
-    .filter((request) => {
-      const startDate = request.startDateKey ? new Date(`${request.startDateKey}T00:00:00Z`) : null;
-      const endDate = request.endDateKey ? new Date(`${request.endDateKey}T00:00:00Z`) : null;
-      if (!startDate || !endDate) return false;
-      return startDate <= end && endDate >= start;
-    });
-}
-
 async function loadAttendanceRecord(
   adminDb: Firestore,
   employee: PayrollEmployeeRecord,
   month: string,
 ): Promise<AttendanceRecord> {
-  const window = getMonthWindow(month);
-  const daysSnap = await adminDb
-    .collection("users")
-    .doc(employee.uid)
-    .collection("attendance")
-    .doc(window.year)
-    .collection("months")
-    .doc(window.monthToken)
-    .collection("days")
-    .get();
+  const summary = await loadPayrollAttendanceSummary(adminDb, {
+    employeeId: employee.employeeId,
+    uid: employee.uid,
+    month,
+    baseSalary: employee.salary,
+  });
 
-  if (daysSnap.empty) {
+  if (!summary) {
     throw new PayrollServiceError(
       `Attendance is missing for ${employee.name} in ${month}.`,
       422,
     );
   }
 
-  const days = daysSnap.docs.map((row) => row.data() as AttendanceDayDoc);
-  const approvedLeaves = await loadApprovedLeaves(adminDb, employee.uid, month);
-  const leaveSummaryByUid = buildMonthlyApprovedLeaveSummaryByUser(approvedLeaves, month);
-  const approvedLeaveDays = leaveSummaryByUid[employee.uid]?.chargeableLeaveDays ?? 0;
-
-  const daysPresent = days.filter((day) => {
-    const dayStatus = String(day.dayStatus ?? "").toLowerCase();
-    const status = String(day.status ?? "").toLowerCase();
-    return (
-      dayStatus === "present" ||
-      dayStatus === "late" ||
-      status === "checked_in" ||
-      status === "checked_out" ||
-      status === "on_break"
-    );
-  }).length;
-
-  const lateCount = days.filter((day) => String(day.dayStatus ?? "").toLowerCase() === "late").length;
-  const explicitAbsent = days.filter((day) => {
-    const dayStatus = String(day.dayStatus ?? "").toLowerCase();
-    const status = String(day.status ?? "").toLowerCase();
-    return dayStatus === "absent" || status === "absent";
-  }).length;
-
-  const daysAbsent =
-    explicitAbsent > 0
-      ? explicitAbsent
-      : Math.max(0, PAYROLL_MONTH_DAYS - daysPresent - approvedLeaveDays);
-
-  return {
-    employeeId: employee.employeeId,
-    uid: employee.uid,
-    month,
-    daysPresent,
-    daysAbsent,
-    lateCount,
-    leavesApproved: approvedLeaveDays,
-  };
+  return summary;
 }
 
 async function hasAttendanceForMonth(
@@ -439,7 +363,7 @@ async function hasAttendanceForMonth(
   employeeUid: string,
   month: string,
 ) {
-  const window = getMonthWindow(month);
+  const window = getPayrollMonthWindow(month);
   const snapshot = await adminDb
     .collection("users")
     .doc(employeeUid)
@@ -491,6 +415,20 @@ function buildPayrollRecord(input: {
     bonuses,
     deductions: totalDeductions,
     leaveApprovedDays: input.attendance.leavesApproved,
+    paidLeaveDays: input.attendance.paidLeaveDays,
+    leaveAllowanceDays: input.attendance.leaveAllowanceDays,
+    leaveExcessDays: input.attendance.leaveExcessDays,
+    unpaidLeaveDays: input.attendance.unpaidLeaveDays,
+    totalWorkingDays: input.attendance.totalWorkingDays,
+    payableDays: input.attendance.payableDays,
+    attendanceTrackedDays: input.attendance.attendanceTrackedDays,
+    explicitAbsentDays: input.attendance.explicitAbsentDays,
+    totalWorkedMinutes: input.attendance.totalWorkedMinutes,
+    totalSessions: input.attendance.totalSessions,
+    attendanceCorrectionCount: input.attendance.attendanceCorrectionCount,
+    attendanceCorrectionPendingCount: input.attendance.attendanceCorrectionPendingCount,
+    attendanceCorrectionReasons: input.attendance.attendanceCorrectionReasons,
+    attendanceCorrectionSummary: input.attendance.attendanceCorrectionSummary,
     netPay,
     netSalary: netPay,
     status: "GENERATED",

@@ -74,6 +74,10 @@ export interface Payroll {
   baseSalary: number;
   daysPresent: number;
   daysAbsent: number;
+  totalWorkingDays?: number;
+  payableDays?: number;
+  attendanceTrackedDays?: number;
+  explicitAbsentDays?: number;
   lates: number;
   lateCount?: number;
   incentives: number;
@@ -89,6 +93,8 @@ export interface Payroll {
   leaveExcessDays?: number;
   unpaidLeaveDays?: number;
   leaveDeduction?: number;
+  totalWorkedMinutes?: number;
+  totalSessions?: number;
   saturdayExcludedDays?: number;
   sundayExcludedDays?: number;
   attendanceCorrectionCount?: number;

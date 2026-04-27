@@ -19,9 +19,11 @@ import {
 } from "firebase/firestore";
 import { db, isFirebaseReady } from "@/lib/firebase/client";
 import { getTodayKey } from "@/lib/firebase/attendance";
+import { calculateActiveMinutes } from "@/lib/attendance-utils";
 import { applyBulkLeadActions } from "@/lib/crm/bulk-actions";
 import { transferLeadCustody } from "@/lib/crm/custody";
 import { buildLeadActor } from "@/lib/crm/timeline";
+import type { PresenceStatus } from "@/lib/types/attendance";
 import type { UserDoc } from "@/lib/types/user";
 import type { LeadDoc } from "@/lib/types/crm";
 import { isLeadDistributable } from "@/lib/utils/leadLogic";
@@ -30,9 +32,10 @@ import { buildTaskWriteFields } from "@/lib/tasks/model";
 
 type PresenceRow = {
   uid: string;
-  status: "checked_in" | "checked_out" | "on_leave";
+  status: PresenceStatus;
   checkedInAt: Timestamp | Date | string | number | null;
   checkedOutAt: Timestamp | Date | string | number | null;
+  sessions?: unknown[];
 };
 
 type TaskStatus = "pending" | "in_progress" | "completed";
@@ -41,14 +44,6 @@ type TaskPriority = "high" | "medium" | "low";
 function toDate(ts: Timestamp | Date | string | number | null | undefined) {
   if (!ts) return null;
   return (ts as Timestamp).toDate ? (ts as Timestamp).toDate() : new Date(ts as Date | string | number);
-}
-
-function hoursBetween(a: Timestamp | Date | string | number | null | undefined, b: Timestamp | Date | string | number | null | undefined) {
-  const ad = toDate(a);
-  const bd = toDate(b);
-  if (!ad || !bd) return 0;
-  const ms = Math.max(0, bd.getTime() - ad.getTime());
-  return Math.round((ms / (1000 * 60 * 60)) * 10) / 10;
 }
 
 function chunk<T>(arr: T[], size = 10): T[][] {
@@ -179,7 +174,13 @@ export default function TeamAdminControlTowerPage() {
 
   function statusDot(uidX: string) {
     const s = presence[uidX]?.status ?? "checked_out";
-    return s === "checked_in" ? "bg-emerald-500" : s === "on_leave" ? "bg-amber-500" : "bg-slate-400";
+    return s === "checked_in"
+      ? "bg-emerald-500"
+      : s === "on_break"
+        ? "bg-amber-500"
+        : s === "on_leave"
+          ? "bg-amber-500"
+          : "bg-slate-400";
   }
 
   async function assignLeadTransaction(leadId: string, assigneeUid: string) {
@@ -351,7 +352,8 @@ export default function TeamAdminControlTowerPage() {
               <div className="mt-3 space-y-2">
                 {employees.map((e) => {
                   const p = presence[e.uid];
-                  const activeHours = p?.status === "checked_in" ? hoursBetween(p?.checkedInAt, new Date()) : hoursBetween(p?.checkedInAt, p?.checkedOutAt);
+                  const activeHours =
+                    Math.round((calculateActiveMinutes(p as never, new Date()) / 60) * 10) / 10;
                   return (
                     <div key={e.uid} className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -534,7 +536,8 @@ export default function TeamAdminControlTowerPage() {
                   <div className="mt-2 space-y-2">
                     {employees.map((e) => {
                       const p = presence[e.uid];
-                      const activeHours = p?.status === "checked_in" ? hoursBetween(p?.checkedInAt, new Date()) : hoursBetween(p?.checkedInAt, p?.checkedOutAt);
+                      const activeHours =
+                        Math.round((calculateActiveMinutes(p as never, new Date()) / 60) * 10) / 10;
                       const overtime = activeHours > 8;
                       return (
                         <div key={e.uid} className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2 text-xs">

@@ -6,7 +6,7 @@ Prefix seed used: `staging_q2`
 ## Completed
 
 - UAT fixture seed applied successfully:
-  - `npm run seed:uat -- --apply --prefix=staging_q2`
+  - `npm run \ seed:uat -- --apply --prefix=staging_q2`
   - Wrote 31 fixture documents across users/leads/tasks/HR/finance/bulk-action collections.
 - UAT readiness verification passed:
   - `npm run verify:uat -- --prefix=staging_q2`

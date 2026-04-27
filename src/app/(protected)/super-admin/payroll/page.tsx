@@ -45,6 +45,43 @@ type HikeRequestDoc = {
   user?: UserDoc; // Hydrated
 };
 
+function buildUserPayrollProfileUpdate(input: {
+  baseSalary: number;
+  existingPayroll?: PayrollDoc | null;
+  existingSalaryStructure?: UserDoc["salaryStructure"];
+}) {
+  const baseSalary = Math.max(0, Number(input.baseSalary) || 0);
+  const existingPayroll = input.existingPayroll ?? null;
+  const existingSalaryStructure = input.existingSalaryStructure ?? null;
+
+  return {
+    salary: baseSalary,
+    baseSalary,
+    payroll: {
+      baseSalary,
+      allowances: existingPayroll?.allowances ?? {
+        hra: Number(existingSalaryStructure?.hra) || 0,
+        travel: 0,
+        bonus: 0,
+      },
+      taxRegime: existingPayroll?.taxRegime ?? "NEW_REGIME",
+      bankDetails: existingPayroll?.bankDetails ?? { accountNumber: "", ifsc: "" },
+    },
+    salaryStructure: {
+      base: baseSalary,
+      bonusRate: Number(existingSalaryStructure?.bonusRate) || 0,
+      deductionRate: Number(existingSalaryStructure?.deductionRate) || 0,
+      hra: Number(existingSalaryStructure?.hra) || 0,
+      studyAllowance: Number(existingSalaryStructure?.studyAllowance) || 0,
+      professionalTax: Number(existingSalaryStructure?.professionalTax) || 0,
+      pf: Number(existingSalaryStructure?.pf) || 0,
+      insurance: Number(existingSalaryStructure?.insurance) || 0,
+      earnings: existingSalaryStructure?.earnings ?? [],
+      deductions: existingSalaryStructure?.deductions ?? [],
+    },
+  };
+}
+
 // --- Icons ---
 
 function LockIcon({ className }: { className?: string }) {
@@ -359,6 +396,17 @@ function HikeRequestsApprover() {
         await updateDoc(doc(db, "payroll", req.uid), {
           baseSalary: req.requestedSalary
         });
+        if (req.user) {
+          await setDoc(
+            doc(db, "users", req.uid),
+            buildUserPayrollProfileUpdate({
+              baseSalary: req.requestedSalary,
+              existingPayroll: req.user.payroll as PayrollDoc | undefined,
+              existingSalaryStructure: req.user.salaryStructure,
+            }),
+            { merge: true },
+          );
+        }
         await logAudit("UPDATE_PAYROLL", `Approved hike to ₹${req.requestedSalary} for ${req.uid}`, "SUPER_ADMIN");
       }
       
@@ -441,7 +489,21 @@ function PayrollEditor({ user, onClose, onSave }: { user: PayrollUser; onClose: 
     if (!db) return;
     setSaving(true);
     try {
-      await setDoc(doc(db, "payroll", user.uid), form, { merge: true });
+      await Promise.all([
+        setDoc(doc(db, "payroll", user.uid), form, { merge: true }),
+        setDoc(
+          doc(db, "users", user.uid),
+          {
+            ...buildUserPayrollProfileUpdate({
+              baseSalary: form.baseSalary,
+              existingPayroll: form,
+              existingSalaryStructure: user.salaryStructure,
+            }),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        ),
+      ]);
       await logAudit("UPDATE_PAYROLL", `Updated payroll structure for ${user.displayName}`, "SUPER_ADMIN");
       onSave();
       onClose();

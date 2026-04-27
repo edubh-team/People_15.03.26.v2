@@ -3,11 +3,8 @@
 
 import { getAdmin } from "@/lib/firebase/admin";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
-import {
-  buildMonthlyApprovedLeaveSummaryByUser,
-  calculateMonthlyLeaveDeduction,
-} from "@/lib/attendance/leave-policy";
 import { getDefaultPayrollCycle } from "@/lib/payroll/payslip";
+import { loadPayrollAttendanceSummary, PAYROLL_MONTH_DAYS } from "@/lib/server/payroll-attendance";
 import { Payroll } from "@/lib/types/hr";
 import { sendEmail } from "@/lib/email";
 import { isClosedLeadStatus } from "@/lib/leads/status";
@@ -988,26 +985,13 @@ export async function updatePayroll(
 
         const payrollCycle = getDefaultPayrollCycle(createIfMissing.month);
 
-        // Calculate Attendance Stats (Reused Logic)
-        const [year, month] = createIfMissing.month.split("-").map(Number);
-        const mm = String(month).padStart(2, "0");
-        const startKey = `${year}-${mm}-01`;
-        const endKey = `${year}-${mm}-31`;
-
-        const attendanceSnap = await adminDb.collectionGroup("days")
-            .where("userId", "==", createIfMissing.uid)
-            .where("dateKey", ">=", startKey)
-            .where("dateKey", "<=", endKey)
-            .get();
-        
-        let daysPresent = 0;
-        let lates = 0;
-
-        attendanceSnap.forEach(doc => {
-            const d = doc.data();
-            if (d.dayStatus === "present" || d.dayStatus === "late") daysPresent++;
-            if (d.dayStatus === "late") lates++;
-        });
+        const attendance =
+          await loadPayrollAttendanceSummary(adminDb, {
+            employeeId: userData?.employeeId || createIfMissing.uid,
+            uid: createIfMissing.uid,
+            month: createIfMissing.month,
+            baseSalary: Math.max(0, Number(updates.baseSalary || 0)),
+          });
 
         // Initialize new payroll object
         payroll = {
@@ -1017,9 +1001,24 @@ export async function updatePayroll(
             employeeId: userData?.employeeId || createIfMissing.uid,
             baseSalary: updates.baseSalary, // Use provided update
             basicSalary: updates.baseSalary,
-            daysPresent,
-            daysAbsent: 30 - daysPresent,
-            lates,
+            daysPresent: attendance?.daysPresent ?? 0,
+            daysAbsent: attendance?.daysAbsent ?? PAYROLL_MONTH_DAYS,
+            totalWorkingDays: attendance?.totalWorkingDays ?? PAYROLL_MONTH_DAYS,
+            payableDays: attendance?.payableDays ?? 0,
+            attendanceTrackedDays: attendance?.attendanceTrackedDays ?? 0,
+            explicitAbsentDays: attendance?.explicitAbsentDays ?? 0,
+            lates: attendance?.lateCount ?? 0,
+            leaveApprovedDays: attendance?.leavesApproved ?? 0,
+            paidLeaveDays: attendance?.paidLeaveDays ?? 0,
+            leaveAllowanceDays: attendance?.leaveAllowanceDays ?? 0,
+            leaveExcessDays: attendance?.leaveExcessDays ?? 0,
+            unpaidLeaveDays: attendance?.unpaidLeaveDays ?? 0,
+            totalWorkedMinutes: attendance?.totalWorkedMinutes ?? 0,
+            totalSessions: attendance?.totalSessions ?? 0,
+            attendanceCorrectionCount: attendance?.attendanceCorrectionCount ?? 0,
+            attendanceCorrectionPendingCount: attendance?.attendanceCorrectionPendingCount ?? 0,
+            attendanceCorrectionReasons: attendance?.attendanceCorrectionReasons ?? [],
+            attendanceCorrectionSummary: attendance?.attendanceCorrectionSummary ?? null,
             incentives: 0,
             deductions: 0, // Will be overwritten by update logic
             netSalary: 0,
@@ -1301,50 +1300,9 @@ export async function generatePayroll(monthYear: string, callerIdToken: string) 
         throw new Error("Unauthorized");
     }
 
-    // 2. Define Date Range
-    const [year, month] = monthYear.split("-").map(Number);
-    const mm = String(month).padStart(2, "0");
-    const startKey = `${year}-${mm}-01`;
-    const endKey = `${year}-${mm}-31`;
-
-    // 3. Fetch Active Users
+    // 2. Fetch Active Users
     const usersSnap = await adminDb.collection("users").where("status", "==", "active").get();
     const users = usersSnap.docs.map(d => d.data());
-
-    // 4. Fetch Attendance for the Month (Optimization: Fetch all and group in memory)
-    // Use collectionGroup to query 'days' subcollection which stores daily attendance
-    const attendanceSnap = await adminDb.collectionGroup("days")
-        .where("dateKey", ">=", startKey)
-        .where("dateKey", "<=", endKey)
-        .get();
-    const approvedLeavesSnap = await adminDb
-      .collection("leaveRequests")
-      .where("status", "==", "approved")
-      .limit(5000)
-      .get();
-    
-    const attendanceByUid: Record<
-      string,
-      {
-        uid?: string;
-        userId?: string;
-        dayStatus?: string;
-        correctionStatus?: string;
-        correctionReason?: string | null;
-        [key: string]: unknown;
-      }[]
-    > = {};
-    attendanceSnap.forEach(doc => {
-        const data = doc.data() as { uid?: string; userId?: string; dayStatus?: string; [key: string]: unknown };
-        const uid = data.uid || data.userId;
-        if (!uid) return;
-        if (!attendanceByUid[uid]) attendanceByUid[uid] = [];
-        attendanceByUid[uid].push(data);
-    });
-    const approvedLeaveSummaryByUid = buildMonthlyApprovedLeaveSummaryByUser(
-      approvedLeavesSnap.docs.map((doc) => doc.data()),
-      monthYear,
-    );
 
     const payrolls = [];
     const batch = adminDb.batch();
@@ -1353,47 +1311,24 @@ export async function generatePayroll(monthYear: string, callerIdToken: string) 
         if (!user.salaryStructure) continue; // Skip if no salary info
 
         const uid = user.uid;
-        const userAttendance = attendanceByUid[uid] || [];
-        
-        // Calculate Days Present based on dayStatus ('present' or 'late')
-        const daysPresent = userAttendance.filter(a => 
-            a.dayStatus === "present" || a.dayStatus === "late"
-        ).length;
-
-        // Simple Logic
         const base = Number(user.salaryStructure.base) || 0;
-        const perDay = base / 30; // Standard payroll month
-        
-        // Lates/Deductions
-        const lates = userAttendance.filter(a => a.dayStatus === "late").length;
-        const deductionRate = Number(user.salaryStructure.deductionRate) || 0;
-        const lateDeduction = lates * deductionRate;
-        const leaveSummary = approvedLeaveSummaryByUid[uid];
-        const leaveImpact = calculateMonthlyLeaveDeduction({
-          approvedChargeableDays: leaveSummary?.chargeableLeaveDays ?? 0,
+        const attendance = await loadPayrollAttendanceSummary(adminDb, {
+          employeeId: user.employeeId || uid,
+          uid,
+          month: monthYear,
           baseSalary: base,
         });
-        const attendanceCorrections = userAttendance.filter((day) => {
-          const status = String(day.correctionStatus ?? "").toLowerCase();
-          return status === "approved" || status === "rejected" || status === "pending_hr_review";
-        });
-        const attendanceCorrectionPendingCount = attendanceCorrections.filter(
-          (day) => String(day.correctionStatus ?? "").toLowerCase() === "pending_hr_review",
-        ).length;
-        const attendanceCorrectionReasons = Array.from(
-          new Set(
-            attendanceCorrections
-              .map((day) => (typeof day.correctionReason === "string" ? day.correctionReason.trim() : ""))
-              .filter(Boolean),
-          ),
-        ).slice(0, 5);
-        const attendanceCorrectionSummary =
-          attendanceCorrectionReasons.length > 0 ? attendanceCorrectionReasons.join(" | ") : null;
-        const paidLeaveDays = Math.min(leaveImpact.approvedChargeableDays, leaveImpact.allowanceDays);
-        const payableDays = Math.min(30, daysPresent + paidLeaveDays);
+        if (!attendance) continue;
+
+        const perDay = base / PAYROLL_MONTH_DAYS;
+        
+        // Lates/Deductions
+        const lates = attendance.lateCount;
+        const deductionRate = Number(user.salaryStructure.deductionRate) || 0;
+        const lateDeduction = lates * deductionRate;
+        const payableDays = Math.min(PAYROLL_MONTH_DAYS, attendance.payableDays);
         const grossSalary = perDay * payableDays;
-        const leaveDeduction = leaveImpact.deductionAmount;
-        const deductions = lateDeduction + leaveDeduction;
+        const deductions = lateDeduction;
 
         const net = Math.max(0, grossSalary - deductions);
 
@@ -1405,23 +1340,29 @@ export async function generatePayroll(monthYear: string, callerIdToken: string) 
             uid,
             month: monthYear,
             baseSalary: base,
-            daysPresent,
-            daysAbsent: Math.max(0, 30 - payableDays),
+            basicSalary: base,
+            employeeId: user.employeeId || uid,
+            daysPresent: attendance.daysPresent,
+            daysAbsent: attendance.daysAbsent,
+            totalWorkingDays: attendance.totalWorkingDays,
+            payableDays: attendance.payableDays,
+            attendanceTrackedDays: attendance.attendanceTrackedDays,
+            explicitAbsentDays: attendance.explicitAbsentDays,
             lates,
+            lateCount: lates,
             incentives: 0, // Manual adjustment later
             lateDeduction,
-            leaveApprovedDays: leaveImpact.approvedChargeableDays,
-            paidLeaveDays,
-            leaveAllowanceDays: leaveImpact.allowanceDays,
-            leaveExcessDays: leaveImpact.excessLeaveDays,
-            unpaidLeaveDays: leaveImpact.excessLeaveDays,
-            leaveDeduction,
-            saturdayExcludedDays: leaveSummary?.saturdayExcludedDays ?? 0,
-            sundayExcludedDays: leaveSummary?.sundayExcludedDays ?? 0,
-            attendanceCorrectionCount: attendanceCorrections.length,
-            attendanceCorrectionPendingCount,
-            attendanceCorrectionReasons,
-            attendanceCorrectionSummary,
+            leaveApprovedDays: attendance.leavesApproved,
+            paidLeaveDays: attendance.paidLeaveDays,
+            leaveAllowanceDays: attendance.leaveAllowanceDays,
+            leaveExcessDays: attendance.leaveExcessDays,
+            unpaidLeaveDays: attendance.unpaidLeaveDays,
+            totalWorkedMinutes: attendance.totalWorkedMinutes,
+            totalSessions: attendance.totalSessions,
+            attendanceCorrectionCount: attendance.attendanceCorrectionCount,
+            attendanceCorrectionPendingCount: attendance.attendanceCorrectionPendingCount,
+            attendanceCorrectionReasons: attendance.attendanceCorrectionReasons,
+            attendanceCorrectionSummary: attendance.attendanceCorrectionSummary,
             deductions,
             netSalary: Math.round(net),
             status: "GENERATED",

@@ -482,13 +482,35 @@ export default function PersonnelStudioPage() {
       // 5. Create Payroll Doc
       if (newHire.baseSalary > 0) {
         const payrollRef = doc(db, "payroll", uid);
-        await setDoc(payrollRef, {
+        const normalizedBaseSalary = Number(newHire.baseSalary);
+        const defaultPayrollProfile = {
           uid,
-          baseSalary: Number(newHire.baseSalary),
+          baseSalary: normalizedBaseSalary,
           allowances: { hra: 0, travel: 0, bonus: 0 },
-          taxRegime: "NEW_REGIME",
+          taxRegime: "NEW_REGIME" as const,
           bankDetails: { accountNumber: "", ifsc: "" },
-        });
+        };
+        await Promise.all([
+          setDoc(payrollRef, defaultPayrollProfile),
+          setDoc(doc(db, "users", uid), {
+            salary: normalizedBaseSalary,
+            baseSalary: normalizedBaseSalary,
+            payroll: defaultPayrollProfile,
+            salaryStructure: {
+              base: normalizedBaseSalary,
+              bonusRate: 0,
+              deductionRate: 0,
+              hra: 0,
+              studyAllowance: 0,
+              professionalTax: 0,
+              pf: 0,
+              insurance: 0,
+              earnings: [],
+              deductions: [],
+            },
+            updatedAt: serverTimestamp(),
+          }, { merge: true }),
+        ]);
       }
 
       // 6. Send Onboarding Email (Blocking with error check)

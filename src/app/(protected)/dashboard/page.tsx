@@ -15,7 +15,11 @@ import {
 } from "@/lib/hooks/useAttendance";
 import { useAttendanceActions } from "@/lib/hooks/useAttendanceActions";
 import { getTodayKey } from "@/lib/firebase/attendance";
-import { calculateActiveMinutes } from "@/lib/attendance-utils";
+import {
+  calculateActiveMinutes,
+  getAttendancePunchCounts,
+  getAttendanceSessionCount,
+} from "@/lib/attendance-utils";
 import { db, isFirebaseReady } from "@/lib/firebase/client";
 import {
   collection,
@@ -93,6 +97,8 @@ export default function DashboardIndexPage() {
   } = useAttendanceActions(uid, todayPresence);
 
   const todayLoginMinutes = calculateActiveMinutes(todayPresence);
+  const todaySessionCount = getAttendanceSessionCount(todayPresence);
+  const todayPunchCounts = getAttendancePunchCounts(todayPresence);
 
   const dailyTargetLeads = 20;
   
@@ -291,11 +297,28 @@ export default function DashboardIndexPage() {
     const events: Array<{ label: string; at: Date }> = [];
     const days = recentDaysQuery.data ?? [];
     for (const d of days) {
+      if (d.sessions && Array.isArray(d.sessions) && d.sessions.length > 0) {
+        d.sessions.forEach((session, index) => {
+          if (session.checkedInAt) {
+            events.push({
+              label: d.sessions!.length > 1 ? `Checked in #${index + 1}` : "Checked in",
+              at: toDateSafe(session.checkedInAt),
+            });
+          }
+          if (session.checkedOutAt) {
+            events.push({
+              label: d.sessions!.length > 1 ? `Checked out #${index + 1}` : "Checked out",
+              at: toDateSafe(session.checkedOutAt),
+            });
+          }
+        });
+        continue;
+      }
       if (d.checkedInAt) events.push({ label: "Checked in", at: toDateSafe(d.checkedInAt) });
       if (d.checkedOutAt) events.push({ label: "Checked out", at: toDateSafe(d.checkedOutAt) });
     }
     events.sort((a, b) => b.at.getTime() - a.at.getTime());
-    return events.slice(0, 3);
+    return events.filter((event) => !Number.isNaN(event.at.getTime())).slice(0, 3);
   }, [recentDaysQuery.data]);
 
   const hrGoalMinutes = 480;
@@ -372,9 +395,9 @@ export default function DashboardIndexPage() {
                 </div>
               </div>
               <div>
-                <div className="text-xs font-medium text-slate-600">Recent days</div>
+                <div className="text-xs font-medium text-slate-600">Sessions today</div>
                 <div className="mt-1 text-lg font-semibold tracking-tight">
-                  {(recentDaysQuery.data ?? []).length}
+                  {todaySessionCount}
                 </div>
               </div>
               <div>
@@ -419,7 +442,10 @@ export default function DashboardIndexPage() {
                   />
                 </div>
                 <div className="mt-2 text-xs text-slate-600">
-                  Current Session: {formatHours(todayLoginMinutes)}
+                  Total worked today: {formatHours(todayLoginMinutes)}
+                </div>
+                <div className="mt-2 text-xs text-slate-600">
+                  Punches: {todayPunchCounts.checkIns} in / {todayPunchCounts.checkOuts} out
                 </div>
                 <div className="mt-2 text-xs text-slate-600">
                   Location:{" "}

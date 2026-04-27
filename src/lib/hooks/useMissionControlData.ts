@@ -4,6 +4,7 @@ import { db } from "@/lib/firebase/client";
 import type { UserDoc } from "@/lib/types/user";
 import type { LeadDoc } from "@/lib/types/crm";
 import { startOfDay, startOfWeek, startOfMonth } from "date-fns";
+import { isPresentAttendanceStatus } from "@/lib/attendance/status";
 import { getTodayKey } from "@/lib/firebase/attendance";
 import { toDateSafe as toDate } from "@/lib/attendance-utils";
 import type { PresenceDoc } from "@/lib/types/attendance";
@@ -520,7 +521,7 @@ function calculatePipelineMetrics(leads: LeadDoc[], users: UserDoc[], presenceDo
 
   const activeUsers = users.filter(u => u.isActive || u.status === 'active').length;
 
-  const presentUsers = presenceDocs.filter(p => p.status !== 'on_leave').length;
+  const presentUsers = presenceDocs.filter((p) => isPresentAttendanceStatus(p.status)).length;
   const onTimeUsers = presenceDocs.filter(p => p.dayStatus === 'present').length;
 
   return {

@@ -5,6 +5,12 @@ export type BreakSession = {
   end?: unknown | null;
 };
 
+export type AttendanceSession = {
+  checkedInAt: unknown;
+  checkedOutAt?: unknown | null;
+  breaks?: BreakSession[];
+};
+
 export type GeoLocation = {
   lat: number;
   lng: number;
@@ -23,6 +29,10 @@ export type PresenceDoc = {
   dayStatus?: AttendanceDayStatus;
   location?: GeoLocation | null;
   breaks?: BreakSession[];
+  sessions?: AttendanceSession[];
+  sessionCount?: number;
+  checkInCount?: number;
+  checkOutCount?: number;
   autoCheckout?: boolean;
   updatedAt: unknown;
 };
@@ -36,6 +46,10 @@ export type AttendanceDayDoc = {
   dayStatus?: AttendanceDayStatus;
   location?: GeoLocation | null;
   breaks?: BreakSession[];
+  sessions?: AttendanceSession[];
+  sessionCount?: number;
+  checkInCount?: number;
+  checkOutCount?: number;
   autoCheckout?: boolean;
   createdAt: unknown;
   updatedAt: unknown;

@@ -32,6 +32,8 @@ import Pagination from "@/components/ui/Pagination";
 import LeadDistributorWidget from "@/components/team/LeadDistributorWidget";
 import { buildTaskWriteFields } from "@/lib/tasks/model";
 import { useTeamManagementScope } from "@/lib/hooks/useTeamManagementScope";
+import { calculateActiveMinutes } from "@/lib/attendance-utils";
+import type { PresenceStatus } from "@/lib/types/attendance";
 import type { LeadDoc, LeadStatus } from "@/lib/types/crm";
 import type { UserDoc } from "@/lib/types/user";
 import { canManageTeam } from "@/lib/access";
@@ -59,9 +61,10 @@ const LISTENER_LIMIT = 400;
 
 type PresenceRow = {
   uid: string;
-  status: "checked_in" | "checked_out" | "on_leave";
+  status: PresenceStatus;
   checkedInAt: Timestamp | Date | string | number | null;
   checkedOutAt: Timestamp | Date | string | number | null;
+  sessions?: unknown[];
 };
 
 type LeadRow = {
@@ -134,17 +137,6 @@ function toDate(ts: unknown) {
     : new Date(ts as Date | string | number);
 }
 
-function hoursBetween(
-  a: Timestamp | Date | string | number | null | undefined,
-  b: Timestamp | Date | string | number | null | undefined,
-) {
-  const ad = toDate(a);
-  const bd = toDate(b);
-  if (!ad || !bd) return 0;
-  const ms = Math.max(0, bd.getTime() - ad.getTime());
-  return Math.round((ms / (1000 * 60 * 60)) * 10) / 10;
-}
-
 function toDateKey(value: Date) {
   return value.toISOString().slice(0, 10);
 }
@@ -167,6 +159,7 @@ function getLeadOwnerUid(lead: Pick<LeadDoc, "assignedTo" | "ownerUid">) {
 
 function getPresenceTone(status: PresenceRow["status"] | undefined) {
   if (status === "checked_in") return "bg-emerald-500";
+  if (status === "on_break") return "bg-amber-500";
   if (status === "on_leave") return "bg-amber-500";
   return "bg-slate-400";
 }
@@ -1440,9 +1433,7 @@ export default function TeamManagementPage() {
         const presence = presenceByUid[user.uid];
         const checkIn = toDate(presence?.checkedInAt);
         const activeHours =
-          presence?.status === "checked_in"
-            ? hoursBetween(presence?.checkedInAt, new Date())
-            : hoursBetween(presence?.checkedInAt, presence?.checkedOutAt);
+          Math.round((calculateActiveMinutes(presence as never, new Date()) / 60) * 10) / 10;
         return {
           uid: user.uid,
           name: getRepLabel(user),

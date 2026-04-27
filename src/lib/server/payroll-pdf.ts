@@ -136,6 +136,43 @@ function drawPayslipTable(
   });
 }
 
+function drawAttendanceSummary(
+  doc: PdfDoc,
+  input: ReturnType<typeof buildPayslipPreviewModel>,
+  x: number,
+  y: number,
+  width: number,
+) {
+  const columns = 4;
+  const gap = 10;
+  const cardWidth = (width - gap * (columns - 1)) / columns;
+  const cardHeight = 50;
+
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.muted).text(
+    "ATTENDANCE SNAPSHOT",
+    x,
+    y,
+    {
+      width,
+    },
+  );
+
+  input.attendanceRows.forEach((row, index) => {
+    const column = index % columns;
+    const rowIndex = Math.floor(index / columns);
+    const cardX = x + column * (cardWidth + gap);
+    const cardY = y + 18 + rowIndex * (cardHeight + gap);
+
+    doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 10).fillAndStroke(COLORS.soft, COLORS.border);
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.muted).text(row.label, cardX + 10, cardY + 10, {
+      width: cardWidth - 20,
+    });
+    doc.font("Helvetica").fontSize(12).fillColor(COLORS.ink).text(row.value, cardX + 10, cardY + 26, {
+      width: cardWidth - 20,
+    });
+  });
+}
+
 export async function generatePayrollPdf(details: PayrollDetailsResponse) {
   const payslip = buildPayslipPreviewModel({
     employee: {
@@ -226,7 +263,8 @@ export async function generatePayrollPdf(details: PayrollDetailsResponse) {
     value: payslip.department,
   });
 
-  drawPayslipTable(doc, payslip, PAGE.margin, 230, contentWidth);
+  drawAttendanceSummary(doc, payslip, PAGE.margin, 230, contentWidth);
+  drawPayslipTable(doc, payslip, PAGE.margin, 372, contentWidth);
 
   doc.font("Helvetica").fontSize(10).fillColor(COLORS.muted).text(
     "This is a computer-generated slip no need of any signature",

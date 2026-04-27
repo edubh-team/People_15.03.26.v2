@@ -15,6 +15,7 @@ import {
   isWeekend
 } from "date-fns";
 import { useAttendanceMonth, useHolidaysMonth } from "@/lib/hooks/useAttendance";
+import { isOnLeaveAttendanceState, isPresentAttendanceRecord } from "@/lib/attendance/status";
 import type { AttendanceDayDoc } from "@/lib/types/attendance";
 import { Timestamp } from "firebase/firestore";
 
@@ -74,8 +75,8 @@ export default function AttendanceCalendarModal({ uid, isOpen, onClose, userName
     // Check Attendance Record
     if (attendanceMap.has(key)) {
       const record = attendanceMap.get(key)!;
-      if (record.dayStatus === 'on_leave') return { type: 'leave', label: 'On Leave' };
-      if (record.status === 'checked_in' || record.status === 'checked_out') return { type: 'present', label: 'Present' };
+      if (isOnLeaveAttendanceState(record.status, record.dayStatus)) return { type: 'leave', label: 'On Leave' };
+      if (isPresentAttendanceRecord(record)) return { type: 'present', label: 'Present' };
       // If record exists but not present/leave (e.g. absent marked explicitly), treat as absent
       return { type: 'absent', label: 'Absent' };
     }

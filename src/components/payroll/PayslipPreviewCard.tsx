@@ -69,6 +69,22 @@ export default function PayslipPreviewCard({ payroll, employee }: Props) {
         </div>
       </div>
 
+      <div className="border-b border-slate-300 px-8 py-5">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          Attendance Snapshot
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {payslip.attendanceRows.map((row) => (
+            <div key={row.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                {row.label}
+              </div>
+              <div className="mt-2 text-base font-semibold text-slate-900">{row.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="px-8 py-5">
         <div className="overflow-hidden rounded-2xl border border-slate-300">
           <table className="w-full border-collapse text-sm">

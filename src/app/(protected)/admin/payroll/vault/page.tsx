@@ -78,7 +78,12 @@ function usePayrollFetch() {
               department: userData.department,
               status: userData.status,
               // Handle Salary Location (could be root or in structure)
-              baseSalary: userData.baseSalary || userData.salaryStructure?.base || 0,
+              baseSalary:
+                userData.baseSalary ||
+                userData.salary ||
+                userData.payroll?.baseSalary ||
+                userData.salaryStructure?.base ||
+                0,
               salaryStructure: userData.salaryStructure,
               // Handle Bank Details Safely
               bankDetails: userData.bankDetails ? {

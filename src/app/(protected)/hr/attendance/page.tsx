@@ -5,6 +5,11 @@ import { Dialog } from "@headlessui/react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { RoleBadge } from "@/components/RoleBadge";
 import { isAdminUser, isHrUser, isManagerUser } from "@/lib/access";
+import {
+  isOnLeaveAttendanceState,
+  isPresentAttendanceRecord,
+  normalizeAttendanceStatus,
+} from "@/lib/attendance/status";
 import type { UserDoc } from "@/lib/types/user";
 import {
   reviewHrAttendanceOverride,
@@ -205,15 +210,14 @@ export default function AttendanceOversightPage() {
     const term = searchQuery.trim().toLowerCase();
     return users.filter((user) => {
       const record = attendanceByUid[user.uid];
-      const present = (record?.status ?? "").toLowerCase();
-      const isPresent =
-        present === "present" ||
-        present === "checked_in" ||
-        present === "checked_out" ||
-        present === "on_break";
-      const isLate = record?.late || (record?.dayStatus ?? "").toLowerCase() === "late";
+      const isPresent = isPresentAttendanceRecord(record);
+      const isLate = record?.late || normalizeAttendanceStatus(record?.dayStatus) === "late";
       const normalizedStatus =
-        present === "on_leave" ? "on_leave" : isPresent ? (isLate ? "late" : "present") : "absent";
+        isOnLeaveAttendanceState(record?.status, record?.dayStatus)
+          ? "on_leave"
+          : isPresent
+            ? (isLate ? "late" : "present")
+            : "absent";
 
       if (statusFilter !== "all" && normalizedStatus !== statusFilter) return false;
       if (!term) return true;
@@ -299,13 +303,9 @@ export default function AttendanceOversightPage() {
           <tbody className="divide-y divide-slate-100">
             {filteredUsers.map((user) => {
               const record = attendanceByUid[user.uid];
-              const present = (record?.status ?? "").toLowerCase();
-              const isPresent =
-                present === "present" ||
-                present === "checked_in" ||
-                present === "checked_out" ||
-                present === "on_break";
-              const isLate = record?.late || (record?.dayStatus ?? "").toLowerCase() === "late";
+              const present = normalizeAttendanceStatus(record?.status);
+              const isPresent = isPresentAttendanceRecord(record);
+              const isLate = record?.late || normalizeAttendanceStatus(record?.dayStatus) === "late";
               const statusLabel = isPresent
                 ? isLate
                   ? "Late"

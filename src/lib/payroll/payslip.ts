@@ -22,6 +22,11 @@ export type PayslipLineRow = {
   amount: number;
 };
 
+export type PayslipDetailRow = {
+  label: string;
+  value: string;
+};
+
 export type PayslipPreviewModel = {
   companyName: string;
   tagline: string;
@@ -32,6 +37,7 @@ export type PayslipPreviewModel = {
   department: string;
   paymentPeriodLabel: string;
   paymentDateLabel: string;
+  attendanceRows: PayslipDetailRow[];
   earningsRows: PayslipLineRow[];
   deductionRows: PayslipLineRow[];
   totalEarnings: number;
@@ -117,6 +123,19 @@ function parseDateValue(value: string | null | undefined) {
   const source = value.includes("T") ? value : `${value}T00:00:00Z`;
   const parsed = new Date(source);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatWholeNumber(value: unknown) {
+  return new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: 0,
+  }).format(toAmount(value));
+}
+
+function formatDurationMinutes(value: unknown) {
+  const minutes = Math.max(0, Number(value) || 0);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${hours}h ${remainder}m`;
 }
 
 function getOrdinalSuffix(day: number) {
@@ -269,6 +288,16 @@ export function buildPayslipPreviewModel(input: PayslipModelInput): PayslipPrevi
   const totalDeductions = deductionRows.reduce((sum, row) => sum + row.amount, 0);
   const employeeId = input.employee.employeeId || payroll.employeeId || payroll.uid;
   const netPay = toAmount(payroll.netPay ?? payroll.netSalary ?? totalEarnings - totalDeductions);
+  const attendanceRows: PayslipDetailRow[] = [
+    { label: "Working Days Basis", value: formatWholeNumber(payroll.totalWorkingDays ?? 30) },
+    { label: "Present Days", value: formatWholeNumber(payroll.daysPresent) },
+    { label: "Payable Days", value: formatWholeNumber(payroll.payableDays ?? payroll.daysPresent) },
+    { label: "LOP Days", value: formatWholeNumber(payroll.daysAbsent) },
+    { label: "Approved Leave", value: formatWholeNumber(payroll.leaveApprovedDays ?? 0) },
+    { label: "Late Marks", value: formatWholeNumber(payroll.lateCount ?? payroll.lates) },
+    { label: "Sessions Logged", value: formatWholeNumber(payroll.totalSessions ?? 0) },
+    { label: "Worked Hours", value: formatDurationMinutes(payroll.totalWorkedMinutes ?? 0) },
+  ];
 
   return {
     ...PAYSLIP_BRANDING,
@@ -282,6 +311,7 @@ export function buildPayslipPreviewModel(input: PayslipModelInput): PayslipPrevi
       payroll.month,
     ),
     paymentDateLabel: formatPayslipDate(payroll.paymentDate, "long"),
+    attendanceRows,
     earningsRows,
     deductionRows,
     totalEarnings,

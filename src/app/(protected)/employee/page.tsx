@@ -4,6 +4,11 @@ import { useMemo, useState } from "react";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { useAuth } from "@/components/auth/AuthProvider";
 import EmployeePayslipsPanel from "@/components/payroll/EmployeePayslipsPanel";
+import {
+  calculateActiveMinutes,
+  getAttendancePunchCounts,
+  getAttendanceSessionCount,
+} from "@/lib/attendance-utils";
 import { getTodayKey } from "@/lib/firebase/attendance";
 import {
   useCheckIn,
@@ -12,7 +17,6 @@ import {
   useMyAttendanceDays,
   useMyPresence,
 } from "@/lib/hooks/useAttendance";
-import { RoleBadge } from "@/components/RoleBadge";
 
 function formatMaybeTimestamp(value: unknown) {
   if (!value) return null;
@@ -50,9 +54,15 @@ export default function EmployeePage() {
     return p;
   }, [presenceQuery.data, todayKey]);
 
+  const todayWorkedMinutes = calculateActiveMinutes(todayPresence);
+  const todaySessionCount = getAttendanceSessionCount(todayPresence);
+  const todayPunchCounts = getAttendancePunchCounts(todayPresence);
+
   const statusLabel = todayPresence?.status
     ? todayPresence.status === "checked_in"
       ? "Checked in"
+      : todayPresence.status === "on_break"
+        ? "On break"
       : todayPresence.status === "checked_out"
         ? "Checked out"
         : "On leave"
@@ -61,6 +71,8 @@ export default function EmployeePage() {
   const statusTone = todayPresence?.status
     ? todayPresence.status === "checked_in"
       ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+      : todayPresence.status === "on_break"
+        ? "bg-amber-50 text-amber-900 border-amber-200"
       : todayPresence.status === "checked_out"
         ? "bg-slate-50 text-slate-800 border-slate-200"
         : "bg-amber-50 text-amber-900 border-amber-200"
@@ -111,6 +123,7 @@ export default function EmployeePage() {
                   !uid ||
                   isBusy ||
                   todayPresence?.status === "checked_in" ||
+                  todayPresence?.status === "on_break" ||
                   todayPresence?.status === "on_leave"
                 }
                 onClick={() => {
@@ -130,7 +143,12 @@ export default function EmployeePage() {
               </button>
               <button
                 type="button"
-                disabled={!uid || isBusy || todayPresence?.status !== "checked_in"}
+                disabled={
+                  !uid ||
+                  isBusy ||
+                  (todayPresence?.status !== "checked_in" &&
+                    todayPresence?.status !== "on_break")
+                }
                 onClick={() => {
                   if (!uid) return;
                   setActionError(null);
@@ -148,7 +166,12 @@ export default function EmployeePage() {
               </button>
               <button
                 type="button"
-                disabled={!uid || isBusy || todayPresence?.status === "checked_in"}
+                disabled={
+                  !uid ||
+                  isBusy ||
+                  todayPresence?.status === "checked_in" ||
+                  todayPresence?.status === "on_break"
+                }
                 onClick={() => {
                   if (!uid) return;
                   setActionError(null);
@@ -177,6 +200,22 @@ export default function EmployeePage() {
                 <div>Checked out at</div>
                 <div className="font-medium text-slate-800">
                   {formatMaybeTimestamp(todayPresence?.checkedOutAt) ?? "—"}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>Worked today</div>
+                <div className="font-medium text-slate-800">
+                  {`${Math.floor(todayWorkedMinutes / 60)}h ${todayWorkedMinutes % 60}m`}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>Sessions</div>
+                <div className="font-medium text-slate-800">{todaySessionCount}</div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>Punches</div>
+                <div className="font-medium text-slate-800">
+                  {todayPunchCounts.checkIns} in / {todayPunchCounts.checkOuts} out
                 </div>
               </div>
             </div>
@@ -212,16 +251,24 @@ export default function EmployeePage() {
                     <tr>
                       <th className="px-4 py-3">Date</th>
                       <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Sessions</th>
+                      <th className="px-4 py-3">Punches</th>
                       <th className="px-4 py-3">In</th>
                       <th className="px-4 py-3">Out</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200/50">
-                    {(daysQuery.data ?? []).map((d) => (
+                    {(daysQuery.data ?? []).map((d) => {
+                      const punchCounts = getAttendancePunchCounts(d);
+                      return (
                       <tr key={d.dateKey} className="hover:bg-white/50 transition-colors">
                         <td className="px-4 py-3">{d.dateKey}</td>
                         <td className="px-4 py-3 capitalize">
                           {d.status.replace("_", " ")}
+                        </td>
+                        <td className="px-4 py-3">{getAttendanceSessionCount(d)}</td>
+                        <td className="px-4 py-3">
+                          {punchCounts.checkIns}/{punchCounts.checkOuts}
                         </td>
                         <td className="px-4 py-3">
                           {formatMaybeTimestamp(d.checkedInAt) ?? "—"}
@@ -230,7 +277,7 @@ export default function EmployeePage() {
                           {formatMaybeTimestamp(d.checkedOutAt) ?? "—"}
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>

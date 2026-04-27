@@ -8,24 +8,19 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  Timestamp,
   where,
 } from "firebase/firestore";
-import { getEffectiveReportsToUid } from "@/lib/sales/hierarchy";
+import { auth } from "@/lib/firebase/client";
 import { db } from "@/lib/firebase/client";
 import { calculateLeaveRangeBreakdown } from "@/lib/attendance/leave-policy";
 import type {
   AttendanceDayDoc,
-  AttendanceDayStatus,
-  BreakSession,
   GeoLocation,
   HolidayDoc,
   LeaveBalanceDoc,
   LeaveRequestDoc,
   PresenceDoc,
-  PresenceStatus,
 } from "@/lib/types/attendance";
-import type { UserDoc } from "@/lib/types/user";
 
 export function getTodayKey(now = new Date()) {
   const yyyy = now.getFullYear();
@@ -34,18 +29,8 @@ export function getTodayKey(now = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function splitDateKey(dateKey: string) {
-  const [yyyy, mm] = dateKey.split("-");
-  return { yyyy: yyyy ?? "0000", mm: mm ?? "01" };
-}
-
 function daysCollection(uid: string, yyyy: string, mm: string) {
   return collection(db!, "users", uid, "attendance", yyyy, "months", mm, "days");
-}
-
-function dayDoc(uid: string, dateKey: string) {
-  const { yyyy, mm } = splitDateKey(dateKey);
-  return doc(db!, "users", uid, "attendance", yyyy, "months", mm, "days", dateKey);
 }
 
 export async function getMyPresence(uid: string) {
@@ -254,262 +239,77 @@ export async function applyForLeave(input: {
   });
 }
 
-async function upsertPresenceAndDay(uid: string, patch: {
-  dateKey: string;
-  status: PresenceStatus;
-  dayStatus?: AttendanceDayStatus;
-  location?: GeoLocation | null;
-  checkedInAt?: unknown | null;
-  checkedOutAt?: unknown | null;
-  breaks?: BreakSession[];
-}) {
-  if (!db) throw new Error("Firebase is not configured");
-  const presenceRef = doc(db, "presence", uid);
-  const dayRef = dayDoc(uid, patch.dateKey);
-
-  const base = {
-    uid,
-    dateKey: patch.dateKey,
-    status: patch.status,
-    ...(typeof patch.dayStatus !== "undefined" ? { dayStatus: patch.dayStatus } : {}),
-    ...(typeof patch.location !== "undefined" ? { location: patch.location } : {}),
-    ...(typeof patch.breaks !== "undefined" ? { breaks: patch.breaks } : {}),
-    updatedAt: serverTimestamp(),
-  };
-
-  const presenceData: Partial<PresenceDoc> & {
-    uid: string;
-    dateKey: string;
-    status: PresenceStatus;
-    updatedAt: unknown;
-  } = {
-    ...base,
-    ...(typeof patch.checkedInAt !== "undefined"
-      ? { checkedInAt: patch.checkedInAt }
-      : {}),
-    ...(typeof patch.checkedOutAt !== "undefined"
-      ? { checkedOutAt: patch.checkedOutAt }
-      : {}),
-  };
-
-  const dayData: Partial<AttendanceDayDoc> & {
-    uid: string;
-    dateKey: string;
-    status: PresenceStatus;
-    createdAt: unknown;
-    updatedAt: unknown;
-  } = {
-    ...base,
-    createdAt: serverTimestamp(),
-    ...(typeof patch.checkedInAt !== "undefined"
-      ? { checkedInAt: patch.checkedInAt }
-      : {}),
-    ...(typeof patch.checkedOutAt !== "undefined"
-      ? { checkedOutAt: patch.checkedOutAt }
-      : {}),
-  };
-
-  await Promise.all([
-    setDoc(presenceRef, presenceData, { merge: true }),
-    setDoc(dayRef, dayData, { merge: true }),
-  ]);
-}
-
-async function notifyAttendanceStakeholders(
-  uid: string,
-  eventType: "check_in" | "check_out",
-  occurredAt: Date,
+async function postAttendanceAction<TPayload extends Record<string, unknown>>(
+  action: string,
+  payload?: TPayload,
 ) {
-  if (!db) return;
-  const firestore = db;
-  const userSnap = await getDoc(doc(firestore, "users", uid));
-  if (!userSnap.exists()) return;
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    throw new Error("You must be signed in.");
+  }
 
-  const user = ({ ...(userSnap.data() as UserDoc), uid } as UserDoc);
-  const reportingManagerId = getEffectiveReportsToUid(user);
-  const recipientUids = new Set<string>();
-  if (user.assignedHR) recipientUids.add(user.assignedHR);
-  if (reportingManagerId) recipientUids.add(reportingManagerId);
-  recipientUids.delete(uid);
-  if (recipientUids.size === 0) return;
+  const token = await currentUser.getIdToken();
+  const response = await fetch("/api/attendance", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      action,
+      ...(payload ?? {}),
+    }),
+  });
 
-  const actorLabel = user.displayName?.trim() || user.email?.trim() || uid;
-  const timeLabel = occurredAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const dateLabel = occurredAt.toLocaleDateString();
-  const title =
-    eventType === "check_in" ? `Attendance: ${actorLabel} checked in` : `Attendance: ${actorLabel} checked out`;
-  const body =
-    eventType === "check_in"
-      ? `${actorLabel} checked in at ${timeLabel} on ${dateLabel}.`
-      : `${actorLabel} checked out at ${timeLabel} on ${dateLabel}.`;
+  const body = (await response.json().catch(() => null)) as
+    | { error?: string }
+    | null;
 
-  await Promise.all(
-    Array.from(recipientUids).map((recipientUid) =>
-      setDoc(doc(collection(firestore, "notifications")), {
-        recipientUid,
-        title,
-        body,
-        read: false,
-        priority: "medium",
-        createdAt: serverTimestamp(),
-        type: "attendance_event",
-        attendanceEventType: eventType,
-        actorUid: uid,
-        actorName: actorLabel,
-      }),
-    ),
-  );
+  if (!response.ok) {
+    throw new Error(body?.error || "Attendance request failed.");
+  }
+
+  return body;
 }
 
 export async function checkIn(uid: string) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-  if (existing && existing.dateKey === dateKey && existing.status === "checked_in") return;
-  if (existing && existing.dateKey === dateKey && existing.status === "on_leave") {
-    throw new Error("You are marked on leave for today.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-  const now = new Date();
-  const minutes = now.getHours() * 60 + now.getMinutes();
-  const shiftStartMinutes = 11 * 60 + 10; // 11:10 AM
-  const dayStatus: AttendanceDayStatus = minutes > shiftStartMinutes ? "late" : "present";
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: "checked_in",
-    dayStatus,
-    checkedInAt: serverTimestamp(),
-    checkedOutAt: null,
-  });
-  try {
-    await notifyAttendanceStakeholders(uid, "check_in", new Date());
-  } catch (notifyError) {
-    console.error("Attendance check-in notification failed", notifyError);
-  }
+  await postAttendanceAction("check_in");
 }
 
 export async function checkOut(uid: string) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-
-  // Allow checkout if status is "checked_in" OR "on_break"
-  if (
-    !existing ||
-    existing.dateKey !== dateKey ||
-    (existing.status !== "checked_in" && existing.status !== "on_break")
-  ) {
-    throw new Error("You are not checked in.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-
-  // If currently on break, close the active break session implicitly
-  let breaks = existing.breaks;
-  if (existing.status === "on_break" && breaks && breaks.length > 0) {
-    const lastBreak = breaks[breaks.length - 1];
-    if (!lastBreak.end) {
-      breaks = [...breaks];
-      breaks[breaks.length - 1] = {
-        ...lastBreak,
-        end: Timestamp.now(),
-      };
-    }
-  }
-
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: "checked_out",
-    checkedOutAt: serverTimestamp(),
-    ...(breaks ? { breaks } : {}),
-  });
-  try {
-    await notifyAttendanceStakeholders(uid, "check_out", new Date());
-  } catch (notifyError) {
-    console.error("Attendance check-out notification failed", notifyError);
-  }
+  await postAttendanceAction("check_out");
 }
 
 export async function markOnLeave(uid: string) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-  if (existing && existing.dateKey === dateKey && existing.status === "checked_in") {
-    throw new Error("Check out before marking on leave.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: "on_leave",
-    dayStatus: "on_leave",
-    checkedInAt: null,
-    checkedOutAt: null,
-  });
+  await postAttendanceAction("mark_on_leave");
 }
 
 export async function startBreak(uid: string) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-  
-  if (!existing || existing.dateKey !== dateKey) {
-    throw new Error("You must check in first.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-  if (existing.status === "on_break") {
-    throw new Error("You are already on a break.");
-  }
-  if (existing.status !== "checked_in") {
-    throw new Error("You must be checked in to take a break.");
-  }
-
-  const currentBreaks = existing.breaks || [];
-  
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: "on_break",
-    breaks: [...currentBreaks, { start: Timestamp.now() }],
-  });
+  await postAttendanceAction("start_break");
 }
 
 export async function endBreak(uid: string) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-
-  if (!existing || existing.dateKey !== dateKey) {
-    throw new Error("No active session found.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-  if (existing.status !== "on_break") {
-    throw new Error("You are not on a break.");
-  }
-
-  const currentBreaks = existing.breaks || [];
-  if (currentBreaks.length === 0) {
-    // Should not happen if status is on_break, but handle gracefully
-    await upsertPresenceAndDay(uid, {
-      dateKey,
-      status: "checked_in",
-    });
-    return;
-  }
-
-  const updatedBreaks = [...currentBreaks];
-  const lastBreak = updatedBreaks[updatedBreaks.length - 1];
-  
-  // Close the break
-  updatedBreaks[updatedBreaks.length - 1] = {
-    ...lastBreak,
-    end: Timestamp.now(),
-  };
-
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: "checked_in",
-    breaks: updatedBreaks,
-  });
+  await postAttendanceAction("end_break");
 }
 
 export async function attachTodayLocation(uid: string, location: GeoLocation) {
-  const dateKey = getTodayKey();
-  const existing = await getMyPresence(uid);
-  if (!existing || existing.dateKey !== dateKey) {
-    throw new Error("No attendance record for today.");
+  if (auth?.currentUser?.uid && auth.currentUser.uid !== uid) {
+    throw new Error("Attendance request user mismatch.");
   }
-  await upsertPresenceAndDay(uid, {
-    dateKey,
-    status: existing.status,
-    dayStatus: existing.dayStatus,
-    location,
-  });
+  await postAttendanceAction("attach_location", { location });
 }
