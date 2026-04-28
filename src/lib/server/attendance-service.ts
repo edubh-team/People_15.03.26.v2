@@ -405,46 +405,48 @@ export async function performAttendanceAction(
     const [presenceSnap, daySnap] = await Promise.all([tx.get(presenceRef), tx.get(dayRef)]);
     const existingPresence = presenceSnap.exists ? presenceSnap.data() : undefined;
     const existingDay = daySnap.exists ? daySnap.data() : undefined;
-    const currentDateKey = String(existingPresence?.dateKey ?? "");
-    const currentStatus = String(existingPresence?.status ?? "");
-    const sameDay = currentDateKey === todayKey;
-    const legacyBreaks = normalizeBreaks(existingPresence?.breaks ?? existingDay?.breaks);
-    const existingSessionsRaw = normalizeSessions(existingPresence?.sessions ?? existingDay?.sessions);
+    const presenceForToday =
+      String(existingPresence?.dateKey ?? "") === todayKey ? existingPresence : undefined;
+    const currentRecord = presenceForToday ?? existingDay;
+    const hasTodayRecord = Boolean(currentRecord);
+    const currentStatus = String(currentRecord?.status ?? "");
+    const legacyBreaks = normalizeBreaks(currentRecord?.breaks);
+    const existingSessionsRaw = normalizeSessions(currentRecord?.sessions);
     const existingSessions =
       existingSessionsRaw.length > 0
         ? existingSessionsRaw
-        : deriveSessionsFromLegacyRecord(existingPresence ?? existingDay, legacyBreaks);
+        : deriveSessionsFromLegacyRecord(currentRecord, legacyBreaks);
     const currentBreaks =
       existingSessionsRaw.length > 0
         ? getCurrentSessionBreaks(existingSessions)
         : legacyBreaks;
     const checkInCount = resolveStoredCount(
-      existingPresence?.checkInCount,
-      existingDay?.checkInCount,
+      currentRecord?.checkInCount,
+      undefined,
       existingSessions.length,
     );
     const checkOutCount = resolveStoredCount(
-      existingPresence?.checkOutCount,
-      existingDay?.checkOutCount,
+      currentRecord?.checkOutCount,
+      undefined,
       existingSessions.filter((session) => Boolean(session.checkedOutAt)).length,
     );
 
     switch (input.action) {
       case "check_in": {
-        if (sameDay && (currentStatus === "checked_in" || currentStatus === "on_break")) {
+        if (currentStatus === "checked_in" || currentStatus === "on_break") {
           return;
         }
-        if (sameDay && currentStatus === "on_leave") {
+        if (currentStatus === "on_leave") {
           throw new Error("You are marked on leave for today.");
         }
-        if (sameDay && currentStatus === "absent") {
+        if (currentStatus === "absent") {
           throw new Error("Your attendance is already marked absent for today. Contact HR.");
         }
 
         const existingDayStatus =
-          typeof existingPresence?.dayStatus === "string"
-            ? existingPresence.dayStatus
-            : (existingDay?.dayStatus as string | undefined);
+          typeof currentRecord?.dayStatus === "string"
+            ? currentRecord.dayStatus
+            : undefined;
         const dayStatus =
           existingDayStatus ??
           (getAttendanceMinutes(now, timeZone) > DEFAULT_SHIFT_START_MINUTES
@@ -452,8 +454,7 @@ export async function performAttendanceAction(
             : "present");
         const sessions = appendSession(existingSessions, nowTimestamp);
         const firstCheckIn =
-          existingPresence?.checkedInAt ??
-          existingDay?.checkedInAt ??
+          currentRecord?.checkedInAt ??
           sessions[0]?.checkedInAt ??
           nowTimestamp;
 
@@ -483,7 +484,7 @@ export async function performAttendanceAction(
       }
 
       case "check_out": {
-        if (!sameDay || (currentStatus !== "checked_in" && currentStatus !== "on_break")) {
+        if (!hasTodayRecord || (currentStatus !== "checked_in" && currentStatus !== "on_break")) {
           throw new Error("You are not checked in.");
         }
         const breaks = closeTrailingBreak(currentBreaks, nowTimestamp);
@@ -512,7 +513,7 @@ export async function performAttendanceAction(
       }
 
       case "start_break": {
-        if (!sameDay) {
+        if (!hasTodayRecord) {
           throw new Error("You must check in first.");
         }
         if (currentStatus === "on_break") {
@@ -544,7 +545,7 @@ export async function performAttendanceAction(
       }
 
       case "end_break": {
-        if (!sameDay) {
+        if (!hasTodayRecord) {
           throw new Error("No active session found.");
         }
         if (currentStatus !== "on_break") {
@@ -573,10 +574,10 @@ export async function performAttendanceAction(
       }
 
       case "mark_on_leave": {
-        if (sameDay && ["checked_in", "on_break", "checked_out", "absent"].includes(currentStatus)) {
+        if (hasTodayRecord && ["checked_in", "on_break", "checked_out", "absent"].includes(currentStatus)) {
           throw new Error("Attendance already exists for today. Contact HR for corrections.");
         }
-        if (sameDay && currentStatus === "on_leave") {
+        if (currentStatus === "on_leave") {
           return;
         }
 
@@ -604,7 +605,7 @@ export async function performAttendanceAction(
       }
 
       case "attach_location": {
-        if (!sameDay) {
+        if (!hasTodayRecord) {
           throw new Error("No attendance record for today.");
         }
 
@@ -617,15 +618,13 @@ export async function performAttendanceAction(
           patch: {
             status: currentStatus,
             dayStatus:
-              typeof existingPresence?.dayStatus === "string"
-                ? existingPresence.dayStatus
-                : (existingDay?.dayStatus as string | undefined),
+              typeof currentRecord?.dayStatus === "string"
+                ? currentRecord.dayStatus
+                : undefined,
             sessions: existingSessions,
             sessionCount:
-              typeof existingPresence?.sessionCount === "number"
-                ? existingPresence.sessionCount
-                : typeof existingDay?.sessionCount === "number"
-                  ? existingDay.sessionCount
+              typeof currentRecord?.sessionCount === "number"
+                ? currentRecord.sessionCount
                   : existingSessions.length,
             checkInCount,
             checkOutCount,
