@@ -303,13 +303,12 @@ function DetailsModal({
     try {
       setDeleting(true);
       setDeleteError(null);
-      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/finance/transaction", {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
         },
+        credentials: "same-origin",
         body: JSON.stringify({ id: tx.id }),
       });
       if (!res.ok) {

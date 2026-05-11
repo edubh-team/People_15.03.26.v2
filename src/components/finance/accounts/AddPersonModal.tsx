@@ -65,13 +65,12 @@ export default function AddPersonModal({ isOpen, onClose, onSuccess }: Props) {
     }
 
     try {
-      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/finance/accounts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
         },
+        credentials: "same-origin",
         body: JSON.stringify({
           name: normalizedName,
           phone: normalizedPhone,

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { getUserDoc } from "@/lib/firebase/users";
 
 interface Props {
   uid: string | null | undefined;
@@ -19,27 +18,27 @@ export default function UserNameDisplay({ uid, fallback = "Unassigned", classNam
   useEffect(() => {
     if (!uid) {
       setLoading(false);
+      setName(null);
+      setRole(null);
       return;
     }
-
-    // Check cache first if possible (omitted for simplicity, but good practice)
+    const userUid = uid;
     
     async function fetchUser() {
       try {
-        if (!db) return;
-        const userRef = doc(db, "users", uid!);
-        const snap = await getDoc(userRef);
-        
-        if (snap.exists()) {
-          const data = snap.data();
-          setName(data.displayName || data.email || "Unknown User");
-          setRole(data.orgRole || data.role || "");
+        const userDoc = await getUserDoc(userUid);
+
+        if (userDoc) {
+          setName(userDoc.displayName || userDoc.email || "Unknown User");
+          setRole(userDoc.orgRole || userDoc.role || "");
         } else {
           setName("Unknown User");
+          setRole(null);
         }
       } catch (err) {
         console.error("Error fetching user name:", err);
         setName("Error");
+        setRole(null);
       } finally {
         setLoading(false);
       }

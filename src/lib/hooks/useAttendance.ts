@@ -33,6 +33,7 @@ export function useMyPresence(uid: string | null | undefined) {
   return useQuery({
     queryKey: uid ? presenceKey(uid) : ["presence", "anonymous"],
     enabled: Boolean(uid),
+    staleTime: 15_000,
     queryFn: async () => {
       if (!uid) return null;
       return getMyPresence(uid);
@@ -44,6 +45,7 @@ export function useMyAttendanceDays(uid: string | null | undefined, days = 14) {
   return useQuery({
     queryKey: uid ? [...attendanceDaysKey(uid), days] : ["attendanceDays", "anonymous", days],
     enabled: Boolean(uid),
+    staleTime: 60_000,
     queryFn: async () => {
       if (!uid) return [];
       return getRecentAttendanceDays(uid, days);
@@ -147,6 +149,7 @@ export function useAttendanceMonth(uid: string | null | undefined, year: number,
       ? ["attendanceMonth", uid, year, monthIndex0]
       : ["attendanceMonth", "anonymous", year, monthIndex0],
     enabled: Boolean(uid),
+    staleTime: 60_000,
     queryFn: async () => {
       if (!uid) return [];
       return getAttendanceDaysForMonth(uid, year, monthIndex0);
@@ -158,6 +161,7 @@ export function useAttendanceYear(uid: string | null | undefined, year: number) 
   return useQuery({
     queryKey: uid ? ["attendanceYear", uid, year] : ["attendanceYear", "anonymous", year],
     enabled: Boolean(uid),
+    staleTime: 5 * 60_000,
     queryFn: async () => {
       if (!uid) return [];
       return getAttendanceDaysForYear(uid, year);
@@ -168,6 +172,7 @@ export function useAttendanceYear(uid: string | null | undefined, year: number) 
 export function useHolidaysMonth(year: number, monthIndex0: number) {
   return useQuery({
     queryKey: ["holidaysMonth", year, monthIndex0],
+    staleTime: 60 * 60_000,
     queryFn: async () => getHolidaysForMonth(year, monthIndex0),
   });
 }
@@ -176,6 +181,7 @@ export function useApprovedLeaves(uid: string | null | undefined) {
   return useQuery({
     queryKey: uid ? ["approvedLeaveRequests", uid] : ["approvedLeaveRequests", "anonymous"],
     enabled: Boolean(uid),
+    staleTime: 60_000,
     queryFn: async () => {
       if (!uid) return [];
       return getApprovedLeaveRequests(uid);
@@ -187,6 +193,7 @@ export function useMyLeaveRequests(uid: string | null | undefined) {
   return useQuery({
     queryKey: uid ? ["myLeaveRequests", uid] : ["myLeaveRequests", "anonymous"],
     enabled: Boolean(uid),
+    staleTime: 60_000,
     queryFn: async () => {
       if (!uid) return [];
       return getMyLeaveRequests(uid);
@@ -198,6 +205,7 @@ export function useLeaveBalance(uid: string | null | undefined) {
   return useQuery({
     queryKey: uid ? ["leaveBalance", uid] : ["leaveBalance", "anonymous"],
     enabled: Boolean(uid),
+    staleTime: 60_000,
     queryFn: async () => {
       if (!uid) return null;
       return getLeaveBalance(uid);

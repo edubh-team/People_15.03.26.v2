@@ -205,6 +205,7 @@ export default function AttendancePage() {
     for (const d of monthAttendance.data ?? []) m.set(d.dateKey, d);
     return m;
   }, [monthAttendance.data]);
+  const canRenderAttendanceAbsences = !monthAttendance.isLoading && !monthAttendance.error;
 
   const workingDays = useMemo(
     () => computeWorkingDays(year, monthIndex0, holidayKeys),
@@ -610,6 +611,7 @@ export default function AttendancePage() {
                       const isLate = day?.dayStatus === "late";
                       const isPresent = isPresentAttendanceRecord(day);
                       const showAbsent =
+                        canRenderAttendanceAbsences &&
                         inMonth &&
                         isWeekday(d) &&
                         !isHoliday &&
@@ -708,6 +710,7 @@ export default function AttendancePage() {
                       const isLate = rec?.dayStatus === "late";
                       const isPresent = isPresentAttendanceRecord(rec);
                       const isAbsent =
+                        canRenderAttendanceAbsences &&
                         isWeekday(d) &&
                         !isHoliday &&
                         !isLeave &&

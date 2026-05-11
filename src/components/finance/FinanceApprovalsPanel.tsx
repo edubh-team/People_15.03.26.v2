@@ -69,11 +69,8 @@ export default function FinanceApprovalsPanel({ refreshKey = 0, onAction }: Prop
     try {
       setLoading(true);
       setError(null);
-      const token = await firebaseUser.getIdToken();
       const response = await fetch("/api/finance/approvals", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "same-origin",
         cache: "no-store",
       });
 
@@ -115,13 +112,12 @@ export default function FinanceApprovalsPanel({ refreshKey = 0, onAction }: Prop
     try {
       setProcessingId(decisionState.approvalId);
       setError(null);
-      const token = await firebaseUser.getIdToken();
       const response = await fetch("/api/finance/approvals", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
+        credentials: "same-origin",
         body: JSON.stringify({
           id: decisionState.approvalId,
           decision: decisionState.decision,

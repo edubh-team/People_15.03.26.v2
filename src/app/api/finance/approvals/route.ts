@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type Firestore } from "firebase-admin/firestore";
 import {
   applyFinanceTransaction,
   deleteFinanceTransaction,
@@ -17,6 +17,16 @@ import type {
 } from "@/lib/types/finance";
 
 export const runtime = "nodejs";
+
+type ApprovalListCacheEntry = {
+  data: FinanceApprovalListResponse;
+  expiresAt: number;
+};
+
+const APPROVAL_LIST_CACHE_TTL_MS = 1000 * 30;
+const STALE_APPROVAL_LIST_CACHE_TTL_MS = 1000 * 60 * 5;
+const approvalListCache = new Map<string, ApprovalListCacheEntry>();
+const pendingApprovalListReads = new Map<string, Promise<FinanceApprovalListResponse>>();
 
 function toIsoString(value: unknown): string | null {
   if (!value) return null;
@@ -49,6 +59,25 @@ function toIsoString(value: unknown): string | null {
   }
 
   return null;
+}
+
+function getFirebaseErrorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: unknown }).code);
+  }
+  return "";
+}
+
+function summarizeApprovalItems(items: FinanceApprovalListItem[]) {
+  return items.reduce(
+    (summary, item) => {
+      if (item.status === "PENDING") summary.pending += 1;
+      if (item.status === "APPROVED") summary.approved += 1;
+      if (item.status === "REJECTED") summary.rejected += 1;
+      return summary;
+    },
+    { pending: 0, approved: 0, rejected: 0 },
+  );
 }
 
 function mapApprovalItem(
@@ -125,6 +154,56 @@ async function flushAuditWrites(writes: Array<Promise<unknown>>, context: string
   });
 }
 
+async function loadFinanceApprovalList(adminDb: Firestore, uid: string) {
+  const now = Date.now();
+  const cached = approvalListCache.get(uid);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
+  const pendingRead = pendingApprovalListReads.get(uid);
+  if (pendingRead) {
+    return pendingRead;
+  }
+
+  const readPromise = Promise.all([
+    adminDb.collection("finance_approval_requests").orderBy("createdAt", "desc").limit(30).get(),
+    adminDb.collection("finance_audit_events").orderBy("createdAt", "desc").limit(20).get(),
+  ])
+    .then(([listSnap, eventsSnap]) => {
+      const items = listSnap.docs.map((doc) => mapApprovalItem(doc.id, doc.data(), uid));
+      const response: FinanceApprovalListResponse = {
+        items,
+        recentEvents: eventsSnap.docs.map((doc) => mapAuditEvent(doc.id, doc.data())),
+        summary: summarizeApprovalItems(items),
+        policy: getFinanceApprovalPolicy(),
+      };
+
+      approvalListCache.set(uid, {
+        data: response,
+        expiresAt: Date.now() + APPROVAL_LIST_CACHE_TTL_MS,
+      });
+      return response;
+    })
+    .catch((error) => {
+      const staleCached = approvalListCache.get(uid);
+      if (
+        staleCached &&
+        staleCached.expiresAt + STALE_APPROVAL_LIST_CACHE_TTL_MS > Date.now() &&
+        getFirebaseErrorCode(error) === "8"
+      ) {
+        return staleCached.data;
+      }
+      throw error;
+    })
+    .finally(() => {
+      pendingApprovalListReads.delete(uid);
+    });
+
+  pendingApprovalListReads.set(uid, readPromise);
+  return readPromise;
+}
+
 export async function GET(req: Request) {
   const verified = await requireFinanceRequestUser(req);
   if (!verified.ok) return verified.response;
@@ -132,28 +211,8 @@ export async function GET(req: Request) {
   const { adminDb, uid } = verified.value;
 
   try {
-    const [listSnap, pendingSnap, approvedSnap, rejectedSnap, eventsSnap] = await Promise.all([
-      adminDb.collection("finance_approval_requests").orderBy("createdAt", "desc").limit(30).get(),
-      adminDb.collection("finance_approval_requests").where("status", "==", "PENDING").get(),
-      adminDb.collection("finance_approval_requests").where("status", "==", "APPROVED").get(),
-      adminDb.collection("finance_approval_requests").where("status", "==", "REJECTED").get(),
-      adminDb.collection("finance_audit_events").orderBy("createdAt", "desc").limit(20).get(),
-    ]);
-
-    const items = listSnap.docs.map((doc) => mapApprovalItem(doc.id, doc.data(), uid));
-    const recentEvents = eventsSnap.docs.map((doc) => mapAuditEvent(doc.id, doc.data()));
-
     return NextResponse.json<FinanceApprovalListResponse>(
-      {
-        items,
-        recentEvents,
-        summary: {
-          pending: pendingSnap.size,
-          approved: approvedSnap.size,
-          rejected: rejectedSnap.size,
-        },
-        policy: getFinanceApprovalPolicy(),
-      },
+      await loadFinanceApprovalList(adminDb, uid),
       {
         headers: {
           "Cache-Control": "no-store",
@@ -162,6 +221,12 @@ export async function GET(req: Request) {
     );
   } catch (error: any) {
     console.error("Finance approvals load failed:", error);
+    if (getFirebaseErrorCode(error) === "8") {
+      return NextResponse.json(
+        { error: "Firebase quota exceeded while loading finance approvals. Please retry shortly." },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { error: error.message || "Failed to load finance approvals" },
       { status: 500 },
@@ -285,6 +350,7 @@ export async function PATCH(req: Request) {
         ],
         "finance approval reject",
       );
+      approvalListCache.clear();
 
       return NextResponse.json({
         success: true,
@@ -394,6 +460,7 @@ export async function PATCH(req: Request) {
       ],
       "finance approval approve",
     );
+    approvalListCache.clear();
 
     return NextResponse.json({
       success: true,

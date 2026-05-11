@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -29,8 +30,72 @@ export function getTodayKey(now = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function daysCollection(uid: string, yyyy: string, mm: string) {
+function attendanceDaysCollectionGroup() {
+  return collectionGroup(db!, "days");
+}
+
+function monthDaysCollection(uid: string, yyyy: string, mm: string) {
   return collection(db!, "users", uid, "attendance", yyyy, "months", mm, "days");
+}
+
+function getFirestoreErrorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: unknown }).code);
+  }
+  return "";
+}
+
+function shouldFallbackToDirectAttendanceRead(error: unknown) {
+  const code = getFirestoreErrorCode(error);
+  return code === "failed-precondition" || code === "9";
+}
+
+async function getAttendanceDaysForMonthDirect(
+  uid: string,
+  year: number,
+  monthIndex0: number,
+) {
+  const mm = String(monthIndex0 + 1).padStart(2, "0");
+  const directQuery = query(
+    monthDaysCollection(uid, String(year), mm),
+    orderBy("dateKey", "asc"),
+    limit(62),
+  );
+  const snap = await getDocs(directQuery);
+  return snap.docs.map((d) => d.data() as AttendanceDayDoc);
+}
+
+async function getAttendanceDaysForYearDirect(uid: string, year: number) {
+  const parts = await Promise.all(
+    Array.from({ length: 12 }, (_, monthIndex0) =>
+      getAttendanceDaysForMonthDirect(uid, year, monthIndex0),
+    ),
+  );
+  return parts.flat();
+}
+
+async function getRecentAttendanceDaysDirect(uid: string, days: number) {
+  const now = new Date();
+  const monthsToFetch: Array<{ year: number; monthIndex0: number }> = [];
+
+  for (let index = 0; index < 3; index += 1) {
+    const part = new Date(now.getFullYear(), now.getMonth() - index, 1);
+    monthsToFetch.push({
+      year: part.getFullYear(),
+      monthIndex0: part.getMonth(),
+    });
+  }
+
+  const rows = (
+    await Promise.all(
+      monthsToFetch.map((part) =>
+        getAttendanceDaysForMonthDirect(uid, part.year, part.monthIndex0),
+      ),
+    )
+  ).flat();
+
+  rows.sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+  return rows.slice(0, Math.max(1, days));
 }
 
 export async function getMyPresence(uid: string) {
@@ -43,39 +108,32 @@ export async function getMyPresence(uid: string) {
 
 export async function getRecentAttendanceDays(uid: string, days = 14) {
   if (!db) throw new Error("Firebase is not configured");
-  const now = new Date();
-  const monthsToFetch: Array<{ year: number; monthIndex0: number }> = [];
-  for (let i = 0; i < 3; i += 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    monthsToFetch.push({ year: d.getFullYear(), monthIndex0: d.getMonth() });
+  try {
+    const q = query(
+      attendanceDaysCollectionGroup(),
+      where("uid", "==", uid),
+      orderBy("dateKey", "desc"),
+      limit(Math.max(1, days)),
+    );
+    const snap = await getDocs(q);
+    const rows = snap.docs.map((d) => d.data() as AttendanceDayDoc);
+    return rows.length > 0 ? rows : getRecentAttendanceDaysDirect(uid, days);
+  } catch (error) {
+    if (shouldFallbackToDirectAttendanceRead(error)) {
+      return getRecentAttendanceDaysDirect(uid, days);
+    }
+    throw error;
   }
-
-  const all = (
-    await Promise.all(
-      monthsToFetch.map((m) => getAttendanceDaysForMonth(uid, m.year, m.monthIndex0)),
-    )
-  ).flat();
-
-  all.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  return all.slice(0, days);
 }
 
 export async function getAttendanceDaysForMonth(uid: string, year: number, monthIndex0: number) {
   if (!db) throw new Error("Firebase is not configured");
-  const mm = String(monthIndex0 + 1).padStart(2, "0");
-  const q = query(daysCollection(uid, String(year), mm), orderBy("dateKey", "asc"), limit(62));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as AttendanceDayDoc);
+  return getAttendanceDaysForMonthDirect(uid, year, monthIndex0);
 }
 
 export async function getAttendanceDaysForYear(uid: string, year: number) {
   if (!db) throw new Error("Firebase is not configured");
-  const all: AttendanceDayDoc[] = [];
-  for (let monthIndex0 = 0; monthIndex0 < 12; monthIndex0 += 1) {
-    const part = await getAttendanceDaysForMonth(uid, year, monthIndex0);
-    all.push(...part);
-  }
-  return all;
+  return getAttendanceDaysForYearDirect(uid, year);
 }
 
 export async function getHolidaysForMonth(year: number, monthIndex0: number) {
@@ -248,28 +306,29 @@ async function postAttendanceAction<TPayload extends Record<string, unknown>>(
     throw new Error("You must be signed in.");
   }
 
-  const token = await currentUser.getIdToken();
+  const requestBody = JSON.stringify({
+    action,
+    ...(payload ?? {}),
+  });
+
   const response = await fetch("/api/attendance", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      action,
-      ...(payload ?? {}),
-    }),
+    credentials: "same-origin",
+    body: requestBody,
   });
 
-  const body = (await response.json().catch(() => null)) as
+  const responseBody = (await response.json().catch(() => null)) as
     | { error?: string }
     | null;
 
   if (!response.ok) {
-    throw new Error(body?.error || "Attendance request failed.");
+    throw new Error(responseBody?.error || "Attendance request failed.");
   }
 
-  return body;
+  return responseBody;
 }
 
 export async function checkIn(uid: string) {

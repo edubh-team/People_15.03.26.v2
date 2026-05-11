@@ -3,10 +3,9 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { auth, db } from "@/lib/firebase/client";
+import { auth } from "@/lib/firebase/client";
 import { getRedirectResult, GoogleAuthProvider, linkWithCredential, AuthCredential } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
-import { doc, getDoc } from "firebase/firestore";
 import { getHomeRoute } from "@/lib/utils/routing";
 import ForgotPasswordModal from "@/components/auth/ForgotPasswordModal";
 import { ChevronLeftIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
@@ -49,6 +48,10 @@ function SignInContent() {
     () => searchParams.get("redirect") || searchParams.get("next") || fallbackPath,
     [fallbackPath, searchParams],
   );
+  const explicitNextPath = useMemo(
+    () => searchParams.get("redirect") || searchParams.get("next"),
+    [searchParams],
+  );
   const expired = useMemo(() => searchParams.get("expired") === "1", [searchParams]);
 
   const [mode] = useState<"signIn" | "signUp">("signIn");
@@ -64,26 +67,25 @@ function SignInContent() {
   const [pendingCredential, setPendingCredential] = useState<AuthCredential | null>(null);
 
   useEffect(() => {
-    if (firebaseUser && nextPath) router.replace(nextPath);
-  }, [firebaseUser, nextPath, router]);
+    if (!firebaseUser) return;
+
+    if (explicitNextPath) {
+      router.replace(explicitNextPath);
+      return;
+    }
+
+    if (userDoc && nextPath) {
+      router.replace(nextPath);
+    }
+  }, [explicitNextPath, firebaseUser, nextPath, router, userDoc]);
 
   useEffect(() => {
     async function checkRedirect() {
-      if (!auth || !db || checkedRedirect) return;
+      if (!auth || checkedRedirect) return;
       try {
         const res = await getRedirectResult(auth);
         if (res?.user) {
-          if (!db) throw new Error("Firebase Firestore is not configured");
-          const ref = doc(db, "users", res.user.uid);
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const data = snap.data() as { role?: string | null; orgRole?: string | null };
-            const target = getHomeRoute(data.role, data.orgRole);
-            router.replace(target);
-            setIsRedirecting(true);
-          } else {
-            setError("No account profile found. Please contact Admin.");
-          }
+          setIsRedirecting(true);
         }
       } catch {}
       setCheckedRedirect(true);
@@ -95,26 +97,11 @@ function SignInContent() {
     setError(null);
     setIsSubmitting(true);
     try {
-      if (!auth || !db) throw new Error("Firebase is not configured");
+      if (!auth) throw new Error("Firebase is not configured");
       
       // Use Popup flow via useAuth for better compatibility
       await signInWithGoogle();
-      
-      // Handle post-login redirection logic (same as onSubmit)
-      const uid = auth.currentUser?.uid ?? null;
-      if (uid) {
-        const ref = doc(db, "users", uid);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const data = snap.data() as { role?: string | null; orgRole?: string | null };
-          const target = getHomeRoute(data.role, data.orgRole);
-          router.replace(target);
-          setIsRedirecting(true);
-        } else {
-           // Default fallback if user doc missing (should be handled by AuthProvider ensureUserDoc but just in case)
-           setIsRedirecting(true);
-        }
-      }
+      setIsRedirecting(true);
     } catch (err: unknown) {
       const code = (err as { code?: string }).code;
       if (code === "auth/account-exists-with-different-credential") {
@@ -157,21 +144,7 @@ function SignInContent() {
       } else {
         await signUpWithEmailPassword(email, password, displayName);
       }
-      const uid = auth?.currentUser?.uid ?? null;
-      if (uid && db) {
-        const ref = doc(db, "users", uid);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const data = snap.data() as { role?: string | null; orgRole?: string | null };
-          const target = getHomeRoute(data.role, data.orgRole);
-          router.replace(target);
-          setIsRedirecting(true);
-        } else {
-          setIsRedirecting(true);
-        }
-      } else {
-        setIsRedirecting(true);
-      }
+      setIsRedirecting(true);
     } catch (err) {
       setError(getFriendlyAuthError(err));
     } finally {

@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { buildFinanceAccountDirectory, normalizeAccountNumber, normalizeIfscCode, normalizePhone } from "@/lib/finance/accountDirectory";
 import { requireFinanceRequestUser } from "@/lib/server/request-auth";
 import { type AccountPerson, type FinanceAccountDirectoryResponse } from "@/lib/types/finance";
 import type { UserDoc } from "@/lib/types/user";
 
 export const runtime = "nodejs";
+
+type DirectoryCacheEntry = {
+  data: FinanceAccountDirectoryResponse;
+  expiresAt: number;
+};
+
+const DIRECTORY_CACHE_TTL_MS = 1000 * 60;
+const STALE_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 10;
+let directoryCache: DirectoryCacheEntry | null = null;
+let pendingDirectoryRead: Promise<FinanceAccountDirectoryResponse> | null = null;
 
 function noStoreJson(body: FinanceAccountDirectoryResponse, status = 200) {
   return NextResponse.json(body, {
@@ -16,6 +26,66 @@ function noStoreJson(body: FinanceAccountDirectoryResponse, status = 200) {
   });
 }
 
+function getFirebaseErrorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: unknown }).code);
+  }
+  return "";
+}
+
+async function loadFinanceAccountDirectory(
+  adminDb: Firestore,
+): Promise<FinanceAccountDirectoryResponse> {
+  const now = Date.now();
+  if (directoryCache && directoryCache.expiresAt > now) {
+    return directoryCache.data;
+  }
+
+  if (pendingDirectoryRead) {
+    return pendingDirectoryRead;
+  }
+
+  pendingDirectoryRead = Promise.all([
+    adminDb.collection("users").get(),
+    adminDb.collection("finance_external_accounts").get(),
+  ])
+    .then(([usersSnap, externalSnap]) => {
+      const directory = buildFinanceAccountDirectory({
+        users: usersSnap.docs.map(
+          (doc) =>
+            ({
+              ...(doc.data() as UserDoc),
+              uid: doc.id,
+            }) as UserDoc,
+        ),
+        externalAccounts: externalSnap.docs.map((doc) => ({
+          id: doc.id,
+          data: doc.data() as Partial<AccountPerson>,
+        })),
+      });
+      directoryCache = {
+        data: directory,
+        expiresAt: Date.now() + DIRECTORY_CACHE_TTL_MS,
+      };
+      return directory;
+    })
+    .catch((error) => {
+      if (
+        directoryCache &&
+        directoryCache.expiresAt + STALE_DIRECTORY_CACHE_TTL_MS > Date.now() &&
+        getFirebaseErrorCode(error) === "8"
+      ) {
+        return directoryCache.data;
+      }
+      throw error;
+    })
+    .finally(() => {
+      pendingDirectoryRead = null;
+    });
+
+  return pendingDirectoryRead;
+}
+
 export async function GET(req: Request) {
   const verified = await requireFinanceRequestUser(req);
   if (!verified.ok) return verified.response;
@@ -23,28 +93,16 @@ export async function GET(req: Request) {
   const { adminDb } = verified.value;
 
   try {
-    const [usersSnap, externalSnap] = await Promise.all([
-      adminDb.collection("users").get(),
-      adminDb.collection("finance_external_accounts").get(),
-    ]);
-
-    const directory = buildFinanceAccountDirectory({
-      users: usersSnap.docs.map(
-        (doc) =>
-          ({
-            ...(doc.data() as UserDoc),
-            uid: doc.id,
-          }) as UserDoc,
-      ),
-      externalAccounts: externalSnap.docs.map((doc) => ({
-        id: doc.id,
-        data: doc.data() as Partial<AccountPerson>,
-      })),
-    });
-
+    const directory = await loadFinanceAccountDirectory(adminDb);
     return noStoreJson(directory);
   } catch (err: any) {
     console.error("Finance account directory error:", err);
+    if (getFirebaseErrorCode(err) === "8") {
+      return NextResponse.json(
+        { error: "Firebase quota exceeded while loading finance accounts. Please retry shortly." },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { error: err.message || "Failed to load finance account directory" },
       { status: 500 },
@@ -120,6 +178,7 @@ export async function POST(req: Request) {
     };
 
     const ref = await adminDb.collection("finance_external_accounts").add(newPerson);
+    directoryCache = null;
 
     return NextResponse.json({ success: true, id: ref.id }, { status: 201 });
   } catch (err: any) {

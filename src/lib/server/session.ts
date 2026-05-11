@@ -24,12 +24,13 @@ export async function decodeSessionCookieValue(
   sessionCookie: string,
   options?: {
     adminAuth?: Auth;
+    checkRevoked?: boolean;
   },
 ): Promise<DecodedIdToken | null> {
   try {
     return await verifySessionCookieValue(sessionCookie, {
       adminAuth: options?.adminAuth,
-      checkRevoked: true,
+      checkRevoked: options?.checkRevoked ?? false,
     });
   } catch {
     return null;

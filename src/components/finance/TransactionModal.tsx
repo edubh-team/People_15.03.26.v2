@@ -116,11 +116,8 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Props) 
 
     (async () => {
       try {
-        const token = await firebaseUser.getIdToken();
         const res = await fetch("/api/finance/accounts", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: "same-origin",
           cache: "no-store",
         });
 
@@ -357,13 +354,12 @@ export default function TransactionModal({ isOpen, onClose, onSuccess }: Props) 
         proofUrl = await getDownloadURL(storageRef);
       }
 
-      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/finance/transaction", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
         },
+        credentials: "same-origin",
         body: JSON.stringify({
           type,
           amount: Number(amount),

@@ -109,11 +109,8 @@ export default function AccountsDirectoryPage() {
     setError(null);
 
     try {
-      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/finance/accounts", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "same-origin",
         cache: "no-store",
       });
 

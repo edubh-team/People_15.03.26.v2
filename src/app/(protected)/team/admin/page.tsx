@@ -317,7 +317,17 @@ export default function TeamAdminControlTowerPage() {
     const yyyy = k.slice(0, 4);
     const mm = k.slice(5, 7);
     const dayRef = doc(db, "users", userId, "attendance", yyyy, "months", mm, "days", k);
-    await setDoc(dayRef, { isOTApproved: approve, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(
+      dayRef,
+      {
+        uid: userId,
+        userId,
+        dateKey: k,
+        isOTApproved: approve,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
   }
 
   async function updateMonthlyTarget(userId: string, nextTarget: number) {
