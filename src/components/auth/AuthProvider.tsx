@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import type { User } from "firebase/auth";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { User, UserCredential } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -28,7 +28,7 @@ type AuthState = {
   isFirebaseReady: boolean;
   isAuthorized: boolean;
   signInWithEmailPassword: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: () => Promise<UserCredential>;
   signUpWithEmailPassword: (
     email: string,
     password: string,
@@ -48,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const pendingGoogleValidationRef = useRef(false);
 
   useEffect(() => {
     const a = auth;
@@ -70,9 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(true);
       try {
         const isGoogle = u.providerData.some((p) => p.providerId === "google.com");
-        const ensured = await ensureUserDoc(u, {
-          requireEmployeeAccess: isGoogle,
-        });
+        if (isGoogle && pendingGoogleValidationRef.current) {
+          return;
+        }
+
+        const ensured = await ensureUserDoc(u);
         setUserDoc(ensured);
         const provider = u.providerData[0]?.providerId ?? "unknown";
         try {
@@ -140,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // rather than Local Storage (shared across all tabs).
         // UX Warning: If the user closes the tab and reopens it, they will be logged out.
         await setPersistence(auth, browserSessionPersistence);
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       },
       async signInWithGoogle() {
         if (!auth) throw new Error("Firebase is not configured");
@@ -148,7 +151,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setPersistence(auth, browserSessionPersistence);
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: "select_account" });
-        await signInWithPopup(auth, provider);
+        pendingGoogleValidationRef.current = true;
+        setIsLoading(true);
+        let popupSignedIn = false;
+
+        try {
+          const credential = await signInWithPopup(auth, provider);
+          popupSignedIn = true;
+          const token = await credential.user.getIdToken(true);
+          let response: Response;
+          try {
+            response = await fetch("/api/auth/google", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken: token }),
+            });
+          } catch {
+            throw new Error(
+              "Network issue while validating Google sign-in. Please check your connection and try again.",
+            );
+          }
+
+          const payload = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+
+          if (!response.ok) {
+            throw new Error(payload?.error || "Google authentication failed");
+          }
+
+          const ensured = await ensureUserDoc(credential.user);
+          setUserDoc(ensured);
+
+          try {
+            await logLoginEvent({
+              uid: credential.user.uid,
+              email: credential.user.email ?? null,
+              provider: "google.com",
+            });
+          } catch {
+            // ignore logging failures
+          }
+
+          return credential;
+        } catch (error) {
+          if (popupSignedIn && auth.currentUser) {
+            try {
+              await fetch("/api/session/clear", { method: "POST" });
+            } catch {}
+            try {
+              await signOut(auth);
+            } catch {
+              // ignore cleanup failures
+            }
+          }
+          throw error;
+        } finally {
+          pendingGoogleValidationRef.current = false;
+          setIsLoading(false);
+        }
       },
       async signUpWithEmailPassword(
         email: string,
@@ -158,14 +219,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!auth) throw new Error("Firebase is not configured");
         // Enforce Tab Isolation for Sign-Up as well
         await setPersistence(auth, browserSessionPersistence);
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        const cred = await createUserWithEmailAndPassword(
+          auth,
+          email.trim().toLowerCase(),
+          password,
+        );
         if (cred.user && cred.user.displayName == null && displayName) {
           await updateProfile(cred.user, { displayName });
         }
         if (cred.user) {
           await upsertUserDoc(cred.user.uid, {
+            authProvider: "email",
+            googleId: null,
             displayName: displayName?.trim() ? displayName.trim() : null,
-            email: cred.user.email ?? null,
+            email: cred.user.email?.trim().toLowerCase() ?? null,
             phone: cred.user.phoneNumber ?? null,
           });
           const ensured = await ensureUserDoc(cred.user);

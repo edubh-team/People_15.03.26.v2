@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import admin from "firebase-admin";
+import { normalizeEmailAddress } from "@/lib/auth/provider";
 import { sendEmail } from "@/lib/email";
 import { buildServerActor, writeServerAudit } from "@/lib/server/audit-log";
 import { requireUserCreationRequestUser } from "@/lib/server/request-auth";
@@ -20,17 +21,21 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     const { email, displayName, role, status, teamLeadId, orgRole } = body;
+    const normalizedEmail =
+      typeof email === "string" && email.trim()
+        ? normalizeEmailAddress(email)
+        : "";
 
-    if (!email) {
+    if (!normalizedEmail) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
     // 1. Create Auth User
     let uid: string;
     try {
-      const userRecord = await adminAuth.createUser({
+        const userRecord = await adminAuth.createUser({
         uid: body.uid || undefined,
-        email,
+        email: normalizedEmail,
         displayName,
         emailVerified: false,
         disabled: false,
@@ -39,7 +44,7 @@ export async function POST(req: Request) {
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'auth/email-already-exists') {
         // If user exists in Auth, try to find them by email to get UID
-        const userRecord = await adminAuth.getUserByEmail(email);
+        const userRecord = await adminAuth.getUserByEmail(normalizedEmail);
         uid = userRecord.uid;
       } else {
         throw err;
@@ -53,12 +58,15 @@ export async function POST(req: Request) {
     const requestedRole = typeof role === "string" ? role : "employee";
     await userDocRef.set({
       uid,
-      email,
+      email: normalizedEmail,
+      authProvider: "email",
+      googleId: null,
       displayName,
       role: requestedRole,
       orgRole: requestedOrgRole,
       status: status || "active",
       teamLeadId: teamLeadId || null,
+      lastLogin: null,
       onboardingCompleted: false, // Explicitly set to false
       createdAt: admin.firestore.Timestamp.now(),
       updatedAt: admin.firestore.Timestamp.now(),
@@ -67,18 +75,18 @@ export async function POST(req: Request) {
     // 3. Generate Password Reset Link
     let link: string;
     try {
-      link = await adminAuth.generatePasswordResetLink(email);
+      link = await adminAuth.generatePasswordResetLink(normalizedEmail);
     } catch (linkError: unknown) {
       console.error("Failed to generate password reset link:", linkError);
       const errorMessage = linkError instanceof Error ? linkError.message : "Unknown error";
       try {
         await writeServerAudit(adminDb, {
           action: "CREATE_USER",
-          details: `Created user ${email} but password reset link generation failed`,
+          details: `Created user ${normalizedEmail} but password reset link generation failed`,
           actor,
           metadata: {
             uid,
-            email,
+            email: normalizedEmail,
             requestedRole,
             requestedOrgRole,
             warning: errorMessage,
@@ -90,7 +98,7 @@ export async function POST(req: Request) {
       // Return a partial success or specific error so the UI can handle it
       return NextResponse.json({ 
         success: true, // User is created, so technically success
-        uid, 
+        uid,
         message: "User created, but failed to generate password reset link. Please reset password manually.",
         warning: errorMessage
       });
@@ -116,7 +124,7 @@ export async function POST(req: Request) {
     `;
 
     try {
-        await sendEmail(email, subject, html);
+        await sendEmail(normalizedEmail, subject, html);
     } catch (emailError) {
         console.error("Failed to send welcome email:", emailError);
         // We don't fail the request, but we might want to alert the admin
@@ -126,11 +134,11 @@ export async function POST(req: Request) {
     try {
       await writeServerAudit(adminDb, {
         action: "CREATE_USER",
-        details: `Created user ${email} and issued onboarding invite`,
+        details: `Created user ${normalizedEmail} and issued onboarding invite`,
         actor,
         metadata: {
           uid,
-          email,
+          email: normalizedEmail,
           requestedRole,
           requestedOrgRole,
         },

@@ -1,8 +1,13 @@
 import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "./client";
+import {
+  getGoogleProviderUid,
+  inferAuthProviderFromProviderData,
+  normalizeEmailAddress,
+  normalizeOptionalEmailAddress,
+} from "@/lib/auth/provider";
 import type { UserDoc } from "@/lib/types/user";
-import { canUserOperate } from "@/lib/people/lifecycle";
 
 type CachedUserDocEntry = {
   userDoc: UserDoc | null;
@@ -14,10 +19,6 @@ const userDocCache = new Map<string, CachedUserDocEntry>();
 const userEmailCache = new Map<string, CachedUserDocEntry>();
 const pendingUserDocReads = new Map<string, Promise<UserDoc | null>>();
 const pendingUserEmailReads = new Map<string, Promise<UserDoc | null>>();
-
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
 
 function readCachedUser(cache: Map<string, CachedUserDocEntry>, key: string) {
   const cached = cache.get(key);
@@ -40,7 +41,7 @@ function primeUserCache(userDoc: UserDoc | null) {
   userDocCache.set(userDoc.uid, cacheEntry);
 
   if (userDoc.email) {
-    userEmailCache.set(normalizeEmail(userDoc.email), cacheEntry);
+    userEmailCache.set(normalizeEmailAddress(userDoc.email), cacheEntry);
   }
 }
 
@@ -54,7 +55,7 @@ function cacheMissingUser(uid: string) {
 function invalidateUserCache(uid: string, email?: string | null) {
   userDocCache.delete(uid);
   if (email) {
-    userEmailCache.delete(normalizeEmail(email));
+    userEmailCache.delete(normalizeEmailAddress(email));
   }
 
   for (const [cacheKey, cached] of userEmailCache.entries()) {
@@ -94,7 +95,7 @@ export async function getUserDoc(uid: string) {
 
 export async function getUserByEmail(email: string) {
   if (!db) throw new Error("Firebase is not configured");
-  const normalized = normalizeEmail(email);
+  const normalized = normalizeEmailAddress(email);
   const cached = readCachedUser(userEmailCache, normalized);
   if (typeof cached !== "undefined") return cached;
 
@@ -119,61 +120,42 @@ export async function getUserByEmail(email: string) {
   return readPromise;
 }
 
-export async function ensureUserDoc(
-  user: User,
-  options?: { requireEmployeeAccess?: boolean },
-) {
+export async function ensureUserDoc(user: User) {
   if (!db) throw new Error("Firebase is not configured");
-  const requiresAccess = Boolean(options?.requireEmployeeAccess);
   const existing = await getUserDoc(user.uid);
-
-  const access =
-    requiresAccess && user.email
-      ? await getUserByEmail(user.email)
-      : null;
-
-  if (requiresAccess) {
-    if (!access) throw new Error("Unauthorized");
-    if (!canUserOperate(access)) throw new Error("Unauthorized");
-  }
+  const authProvider = inferAuthProviderFromProviderData(user.providerData);
+  const googleId = authProvider === "google" ? getGoogleProviderUid(user.providerData) : null;
+  const normalizedEmail = normalizeOptionalEmailAddress(user.email);
+  const lastLogin =
+    user.metadata.lastSignInTime
+      ? new Date(user.metadata.lastSignInTime)
+      : serverTimestamp();
 
   if (existing) {
-    if (requiresAccess && access) {
-      const patch: Partial<UserDoc> = {
-        email: user.email ?? existing.email,
-        displayName: user.displayName ?? existing.displayName,
-        phone: user.phoneNumber ?? existing.phone,
-        photoURL: existing.photoURL ?? user.photoURL ?? null,
-        role: existing.role,
-        status: existing.status,
-        teamLeadId: existing.teamLeadId,
-        reportsTo: existing.reportsTo ?? existing.teamLeadId ?? access.managerId ?? null,
-        temporaryReportsTo: existing.temporaryReportsTo ?? null,
-        temporaryReportsToUntil: existing.temporaryReportsToUntil ?? null,
-        temporaryReportsToReason: existing.temporaryReportsToReason ?? null,
-        orgRole: access.orgRole ?? null,
-        isActive: access.isActive ?? true,
-        managerId: access.managerId ?? null,
-        actingManagerId: existing.actingManagerId ?? null,
-        actingRole: existing.actingRole ?? null,
-        actingOrgRole: existing.actingOrgRole ?? null,
-        actingRoleUntil: existing.actingRoleUntil ?? null,
-      };
-      await updateUserDoc(user.uid, patch);
-      const updated = {
-        ...existing,
-        ...patch,
-      };
-      primeUserCache(updated);
-      return updated;
-    }
-    return existing;
+    const patch: Partial<UserDoc> = {
+      email: normalizedEmail ?? existing.email,
+      displayName: user.displayName ?? existing.displayName,
+      phone: user.phoneNumber ?? existing.phone,
+      photoURL: user.photoURL ?? existing.photoURL ?? null,
+      authProvider,
+      googleId: authProvider === "google" ? (googleId ?? existing.googleId ?? null) : null,
+      lastLogin,
+    };
+    await updateUserDoc(user.uid, patch);
+    const updated = {
+      ...existing,
+      ...patch,
+    };
+    primeUserCache(updated);
+    return updated;
   }
 
   const ref = doc(db, "users", user.uid);
   const next: UserDoc = {
     uid: user.uid,
-    email: user.email ?? null,
+    email: normalizedEmail,
+    authProvider,
+    googleId,
     displayName: user.displayName ?? null,
     photoURL: user.photoURL ?? null,
     phone: user.phoneNumber ?? null,
@@ -187,13 +169,14 @@ export async function ensureUserDoc(
     temporaryReportsTo: null,
     temporaryReportsToUntil: null,
     temporaryReportsToReason: null,
-    orgRole: access?.orgRole ?? null,
-    isActive: access?.isActive ?? true,
-    managerId: access?.managerId ?? null,
+    orgRole: null,
+    isActive: true,
+    managerId: null,
     actingManagerId: null,
     actingRole: null,
     actingOrgRole: null,
     actingRoleUntil: null,
+    lastLogin,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -206,26 +189,38 @@ export async function updateUserDoc(uid: string, patch: Partial<UserDoc>) {
   if (!db) throw new Error("Firebase is not configured");
   const ref = doc(db, "users", uid);
   const existing = readCachedUser(userDocCache, uid);
-  await updateDoc(ref, {
+  const nextPatch: Partial<UserDoc> = {
     ...patch,
+    ...(typeof patch.email === "string"
+      ? { email: normalizeEmailAddress(patch.email) }
+      : {}),
+  };
+  await updateDoc(ref, {
+    ...nextPatch,
     updatedAt: serverTimestamp(),
   });
-  invalidateUserCache(uid, patch.email ?? existing?.email ?? null);
+  invalidateUserCache(uid, nextPatch.email ?? existing?.email ?? null);
 }
 
 export async function upsertUserDoc(uid: string, patch: Partial<UserDoc>) {
   if (!db) throw new Error("Firebase is not configured");
   const ref = doc(db, "users", uid);
   const existing = readCachedUser(userDocCache, uid);
+  const nextPatch: Partial<UserDoc> = {
+    ...patch,
+    ...(typeof patch.email === "string"
+      ? { email: normalizeEmailAddress(patch.email) }
+      : {}),
+  };
   await setDoc(
     ref,
     {
-      ...patch,
+      ...nextPatch,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
   );
-  invalidateUserCache(uid, patch.email ?? existing?.email ?? null);
+  invalidateUserCache(uid, nextPatch.email ?? existing?.email ?? null);
 }
 
 export async function getActiveEmployeesByManager(managerId: string) {

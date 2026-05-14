@@ -2,16 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { formatRoleLabel, getPrimaryRole } from "@/lib/access";
 import { getRoleKnowledgeGuide } from "@/lib/knowledge-center/content";
-import {
-  clearGuidedTourCompletion,
-  GUIDED_TOUR_FORCE_START_KEY,
-} from "@/lib/knowledge-center/state";
-import { getHomeRoute } from "@/lib/utils/routing";
 
 function resolveKnowledgeRouteHref(route?: string | null, userUid?: string | null) {
   if (!route) return null;
@@ -30,7 +24,6 @@ function resolveKnowledgeRouteHref(route?: string | null, userUid?: string | nul
 
 export default function KnowledgeCenterPage() {
   const { userDoc } = useAuth();
-  const router = useRouter();
   const role = useMemo(() => getPrimaryRole(userDoc), [userDoc]);
   const guide = useMemo(() => getRoleKnowledgeGuide(role), [role]);
   const [catalogQuery, setCatalogQuery] = useState("");
@@ -77,14 +70,6 @@ export default function KnowledgeCenterPage() {
 
   const toGroupAnchor = (group: string) => `group-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-  const startTour = () => {
-    clearGuidedTourCompletion(role);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(GUIDED_TOUR_FORCE_START_KEY, "1");
-    }
-    router.push(getHomeRoute(userDoc?.role, userDoc?.orgRole));
-  };
-
   return (
     <AuthGate>
       <div className="space-y-6">
@@ -103,13 +88,6 @@ export default function KnowledgeCenterPage() {
                 Role-scoped view only. You cannot view other role knowledge centers.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={startTour}
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              Start guided tour
-            </button>
           </div>
         </section>
 

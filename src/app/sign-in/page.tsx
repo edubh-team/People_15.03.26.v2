@@ -2,14 +2,13 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronLeftIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
+import ForgotPasswordModal from "@/components/auth/ForgotPasswordModal";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { auth } from "@/lib/firebase/client";
-import { getRedirectResult, GoogleAuthProvider, linkWithCredential, AuthCredential } from "firebase/auth";
-import { FirebaseError } from "firebase/app";
-import { getHomeRoute } from "@/lib/utils/routing";
-import ForgotPasswordModal from "@/components/auth/ForgotPasswordModal";
-import { ChevronLeftIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 import { CANONICAL_DOMAIN_ROUTES } from "@/lib/routes/canonical";
+import { getHomeRoute } from "@/lib/utils/routing";
+import { getRedirectResult } from "firebase/auth";
 
 function isFirebaseAuthError(
   err: unknown,
@@ -19,11 +18,17 @@ function isFirebaseAuthError(
 
 function getFriendlyAuthError(err: unknown) {
   if (!isFirebaseAuthError(err)) return "Auth error";
+  if (err.code === "auth/network-request-failed") {
+    return "Network issue while signing in. Please check your connection and try again.";
+  }
   if (err.code === "auth/configuration-not-found") {
-    return "Firebase Authentication is not enabled for this project. In Firebase Console: Authentication → Get started → Sign-in method → enable Email/Password.";
+    return "Firebase Authentication is not enabled for this project. Enable Email/Password in Firebase Authentication.";
   }
   if (err.code === "auth/invalid-api-key") {
     return "Firebase API key is invalid. Check your `.env.local` values and restart the dev server.";
+  }
+  if (err.code === "auth/account-exists-with-different-credential") {
+    return "This account is registered with email/password. Please login using email and password.";
   }
   return err.message ?? "Auth error";
 }
@@ -60,11 +65,11 @@ function SignInContent() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [checkedRedirect, setCheckedRedirect] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [pendingCredential, setPendingCredential] = useState<AuthCredential | null>(null);
 
   useEffect(() => {
     if (!firebaseUser) return;
@@ -83,67 +88,49 @@ function SignInContent() {
     async function checkRedirect() {
       if (!auth || checkedRedirect) return;
       try {
-        const res = await getRedirectResult(auth);
-        if (res?.user) {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
           setIsRedirecting(true);
         }
-      } catch {}
+      } catch {
+        // ignore redirect fallback errors
+      }
       setCheckedRedirect(true);
     }
+
     void checkRedirect();
-  }, [checkedRedirect, router]);
+  }, [checkedRedirect]);
 
   async function handleGoogleLogin() {
     setError(null);
-    setIsSubmitting(true);
+    setIsGoogleSubmitting(true);
+
     try {
       if (!auth) throw new Error("Firebase is not configured");
-      
-      // Use Popup flow via useAuth for better compatibility
       await signInWithGoogle();
       setIsRedirecting(true);
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === "auth/account-exists-with-different-credential") {
-        const credential = GoogleAuthProvider.credentialFromError(err as FirebaseError);
-        const emailFromError = (err as { customData?: { email?: string } }).customData?.email;
-        if (credential && emailFromError) {
-          setPendingCredential(credential);
-          setEmail(emailFromError);
-          setError("An account with this email already exists. Please enter your password to verify and link your Google account.");
-        } else {
-          setError("An account with this email already exists. Please log in with your password.");
-        }
-      } else if (code !== "auth/popup-closed-by-user") {
+      if ((err as { code?: string }).code !== "auth/popup-closed-by-user") {
         console.error("Google Sign-In Error:", err);
-        setError("Google Sign-In failed. Please try again.");
+        setError(getFriendlyAuthError(err));
       }
     } finally {
-      setIsSubmitting(false);
+      setIsGoogleSubmitting(false);
     }
   }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
+
     try {
       if (mode === "signIn") {
         await signInWithEmailPassword(email, password);
-        // If we have a pending credential (e.g. from a failed Google sign-in due to existing account), link it now
-        if (pendingCredential && auth?.currentUser) {
-          try {
-             await linkWithCredential(auth.currentUser, pendingCredential);
-             setPendingCredential(null);
-             // Optional: notify user linked successfully
-          } catch (linkErr) {
-             console.error("Failed to link credential:", linkErr);
-             // We don't block login if linking fails, but maybe warn?
-             // Proceeding to redirect anyway.
-          }
-        }
       } else {
         await signUpWithEmailPassword(email, password, displayName);
       }
+
       setIsRedirecting(true);
     } catch (err) {
       setError(getFriendlyAuthError(err));
@@ -159,7 +146,7 @@ function SignInContent() {
           <div className="mb-6">
             <button
               onClick={() => router.push("/")}
-              className="group flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800 transition-colors"
+              className="group flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-slate-800"
             >
               <ChevronLeftIcon className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
               Back to Home
@@ -172,6 +159,7 @@ function SignInContent() {
               Session expired. Please sign in to continue.
             </div>
           ) : null}
+
           <div className="flex items-center">
             <h1 className="text-lg font-semibold tracking-tight">
               {mode === "signIn" ? "Sign in" : "Create an account"}
@@ -183,6 +171,7 @@ function SignInContent() {
               ? "Sign in with Google or Email/Password."
               : "Enter your details to get started."}
           </p>
+
           {!isFirebaseReady ? (
             <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Firebase env vars are missing. Add your `NEXT_PUBLIC_FIREBASE_*`
@@ -192,11 +181,18 @@ function SignInContent() {
 
           <button
             type="button"
-            disabled={isSubmitting || isRedirecting || !isFirebaseReady}
+            disabled={isSubmitting || isGoogleSubmitting || isRedirecting || !isFirebaseReady}
             onClick={() => void handleGoogleLogin()}
-            className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+            className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Continue with Google
+            {isGoogleSubmitting ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+                Validating Google...
+              </>
+            ) : (
+              "Continue with Google"
+            )}
           </button>
 
           <div className="mt-5 flex items-center gap-3">
@@ -217,6 +213,7 @@ function SignInContent() {
                 />
               </label>
             ) : null}
+
             <label className="block">
               <div className="text-xs font-medium text-slate-600">Email</div>
               <input
@@ -228,23 +225,25 @@ function SignInContent() {
                 required
               />
             </label>
+
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <label htmlFor="password" className="block text-xs font-medium text-slate-600">
                   Password
                 </label>
-                {mode === "signIn" && (
+                {mode === "signIn" ? (
                   <div className="text-xs">
                     <button
                       type="button"
                       onClick={() => setShowForgotModal(true)}
-                      className="font-medium text-indigo-600 hover:text-indigo-500 transition-colors"
+                      className="font-medium text-indigo-600 transition-colors hover:text-indigo-500"
                     >
                       Forgot password?
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
+
               <div className="relative mt-1 rounded-md">
                 <input
                   id="password"
@@ -259,7 +258,7 @@ function SignInContent() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 z-10 flex h-full items-center pr-3 cursor-pointer text-slate-400 hover:text-slate-600 focus:outline-none"
+                  className="absolute inset-y-0 right-0 z-10 flex h-full cursor-pointer items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
@@ -279,22 +278,21 @@ function SignInContent() {
 
             <button
               type="submit"
-              disabled={isSubmitting || isRedirecting || !isFirebaseReady}
+              disabled={isSubmitting || isGoogleSubmitting || isRedirecting || !isFirebaseReady}
               className="inline-flex h-10 w-full items-center justify-center rounded-md bg-slate-800 px-4 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
             >
               {isRedirecting
-                ? "Redirecting…"
+                ? "Redirecting..."
                 : isSubmitting
-                  ? "Please wait…"
+                  ? "Please wait..."
                   : mode === "signIn"
                     ? "Sign in"
                     : "Create account"}
             </button>
           </form>
-
         </div>
       </div>
-      
+
       <ForgotPasswordModal
         isOpen={showForgotModal}
         onClose={() => setShowForgotModal(false)}

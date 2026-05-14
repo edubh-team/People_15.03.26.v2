@@ -1,3 +1,5 @@
+import type { AuthProviderType } from "@/lib/auth/provider";
+
 export type UserRole =
   | "admin"
   | "teamLead"
@@ -72,6 +74,8 @@ export type UserDoc = {
   uid: string;
   employeeId?: string | null;
   email: string | null;
+  authProvider?: AuthProviderType | null;
+  googleId?: string | null;
   displayName: string | null;
   designation?: string | null;
   department?: string | null;
