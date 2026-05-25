@@ -26,11 +26,23 @@ const cards = [
     tone: "bg-indigo-100 text-indigo-800",
     format: (value: number) => value.toLocaleString(),
   },
+  {
+    key: "drafts",
+    label: "Drafts",
+    tone: "bg-amber-100 text-amber-800",
+    format: (value: number) => value.toLocaleString(),
+  },
+  {
+    key: "sent",
+    label: "Sent",
+    tone: "bg-sky-100 text-sky-800",
+    format: (value: number) => value.toLocaleString(),
+  },
 ] as const;
 
 export default function PayrollDashboardCards({ summary, loading = false }: Props) {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
       {cards.map((card) => (
         <div
           key={card.key}

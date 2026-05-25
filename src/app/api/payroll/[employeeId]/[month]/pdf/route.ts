@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { isAdminUser, isHrUser } from "@/lib/access";
 import { generatePayrollPdf } from "@/lib/server/payroll-pdf";
-import { getPayrollDetails, resolvePayrollOwnership } from "@/lib/server/payroll-service";
+import {
+  getPayrollDetails,
+  recordPayrollDownload,
+  resolvePayrollOwnership,
+} from "@/lib/server/payroll-service";
 import { verifyBearerRequest } from "@/lib/server/request-auth";
 
 export const runtime = "nodejs";
@@ -37,6 +41,19 @@ export async function GET(req: Request, context: RouteContext) {
     const details = await getPayrollDetails(verified.value.adminDb, employeeId, month, {
       payrollId,
     });
+    if (!canAdminister && (!details.exists || !details.payroll.isVisibleToEmployee)) {
+      return NextResponse.json({ error: "Payslip is not available yet." }, { status: 403 });
+    }
+
+    await recordPayrollDownload(
+      verified.value.adminDb,
+      employeeId,
+      month,
+      verified.value.userDoc,
+      canAdminister ? "HR" : "EMPLOYEE",
+      { payrollId },
+    );
+
     const pdfBuffer = await generatePayrollPdf(details);
     const filename = `payslip_${details.employee.employeeId}_${details.payroll.month}.pdf`;
 

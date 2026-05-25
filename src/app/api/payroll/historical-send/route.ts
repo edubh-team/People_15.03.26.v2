@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { generatePayrollRecord } from "@/lib/server/payroll-service";
+import {
+  approvePayrollRecord,
+  sendPayrollToEmployee,
+} from "@/lib/server/payroll-service";
 import { requirePayrollRequestUser } from "@/lib/server/request-auth";
-import type { GeneratePayrollRequest } from "@/lib/types/payroll";
 
 export const runtime = "nodejs";
 
@@ -10,13 +12,21 @@ export async function POST(req: Request) {
   if (!verified.ok) return verified.response;
 
   try {
-    const body = (await req.json()) as Partial<GeneratePayrollRequest>;
+    const body = (await req.json()) as Partial<{
+      employeeId: string;
+      month: string;
+    }>;
+
     const employeeId = typeof body.employeeId === "string" ? body.employeeId : "";
     const month = typeof body.month === "string" ? body.month : "";
-    const payload = await generatePayrollRecord(verified.value.adminDb, {
+
+    await approvePayrollRecord(verified.value.adminDb, employeeId, month, verified.value.userDoc);
+    const payload = await sendPayrollToEmployee(
+      verified.value.adminDb,
       employeeId,
       month,
-    }, verified.value.userDoc);
+      verified.value.userDoc,
+    );
 
     return NextResponse.json(payload, {
       status: 201,
@@ -25,7 +35,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to generate payroll.";
+    const message = error instanceof Error ? error.message : "Failed to backfill and send historical payslip.";
     const status =
       typeof error === "object" &&
       error !== null &&

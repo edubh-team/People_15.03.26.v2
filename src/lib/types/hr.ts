@@ -110,8 +110,33 @@ export interface Payroll {
   earnings?: PayrollEarningsBreakdown | PayrollLineItem[];
   deductionBreakdown?: PayrollDeductionsBreakdown;
   deductionItems?: PayrollLineItem[];
-  status: "GENERATED" | "PAID" | "PENDING_CREATION";
+  status:
+    | "DRAFT"
+    | "GENERATED"
+    | "APPROVED"
+    | "SENT"
+    | "DOWNLOADED"
+    | "PAID"
+    | "PENDING_CREATION";
   payslipUrl?: string;
+  pdfUrl?: string;
+  version?: number;
+  locked?: boolean;
+  sentAt?: Timestamp | Date;
+  downloadedAt?: Timestamp | Date;
+  approvedAt?: Timestamp | Date;
+  generatedBy?: {
+    uid: string;
+    name?: string | null;
+    employeeId?: string | null;
+    role?: string | null;
+  } | null;
+  editedBy?: {
+    uid: string;
+    name?: string | null;
+    employeeId?: string | null;
+    role?: string | null;
+  } | null;
   generatedAt: Timestamp | Date;
   paidAt?: Timestamp | Date;
   userDisplayName?: string;

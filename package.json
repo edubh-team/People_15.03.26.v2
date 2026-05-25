@@ -17,6 +17,7 @@
     "migrate:tasks": "node scripts/migrate-task-identity.mjs",
     "migrate:leads": "node scripts/migrate-lead-statuses.mjs",
     "seed:payroll-ui": "node --env-file=.env.local scripts/seed-payroll-ui-scenarios.mjs",
+    "smoke:payroll-qa": "node --env-file=.env.local scripts/qa/payroll-smoke.mjs",
     "seed:uat": "node scripts/seed-uat-staging.mjs",
     "verify:uat": "node scripts/verify-uat-readiness.mjs",
     "simulate:biweekly": "node scripts/simulate-biweekly-dryrun.mjs",

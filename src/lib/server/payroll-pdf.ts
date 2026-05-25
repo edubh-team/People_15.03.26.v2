@@ -216,6 +216,15 @@ export async function generatePayrollPdf(details: PayrollDetailsResponse) {
     width: 450,
     align: "right",
   });
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.muted).text(
+    `Payslip Month: ${payslip.monthLabel} | Status: ${payslip.statusLabel}`,
+    PAGE.margin + 320,
+    62,
+    {
+      width: 450,
+      align: "right",
+    },
+  );
 
   doc.moveTo(PAGE.margin, 90).lineTo(PAGE.margin + contentWidth, 90).strokeColor(COLORS.border).stroke();
 
@@ -267,12 +276,21 @@ export async function generatePayrollPdf(details: PayrollDetailsResponse) {
   drawPayslipTable(doc, payslip, PAGE.margin, 372, contentWidth);
 
   doc.font("Helvetica").fontSize(10).fillColor(COLORS.muted).text(
-    "This is a computer-generated slip no need of any signature",
+    "This is a computer-generated payslip.",
     PAGE.margin,
-    PAGE.height - 46,
+    PAGE.height - 58,
     {
-      width: contentWidth,
-      align: "center",
+      width: contentWidth / 2,
+      align: "left",
+    },
+  );
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.ink).text(
+    payslip.signatureLabel,
+    PAGE.margin + contentWidth / 2,
+    PAGE.height - 58,
+    {
+      width: contentWidth / 2,
+      align: "right",
     },
   );
 

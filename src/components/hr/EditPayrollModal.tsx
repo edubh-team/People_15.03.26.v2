@@ -3,125 +3,157 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { PencilSquareIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { updatePayroll } from "@/app/actions/hr";
 import { useAuth } from "@/components/auth/AuthProvider";
-import type { Payroll } from "@/lib/types/hr";
-import type { PayrollDetailsResponse } from "@/lib/types/payroll";
+import type {
+  PayrollDetailsResponse,
+  PayrollListItem,
+  SavePayrollRequest,
+} from "@/lib/types/payroll";
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
-  payroll: Payroll | null;
-  onSuccess: () => void;
+  item: PayrollListItem | null;
+  month: string;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
 };
 
 type FormState = {
+  presentDays: number;
+  absentDays: number;
+  leaveDays: number;
+  halfDays: number;
+  overtimeHours: number;
+  workingDays: number;
+  payableDays: number;
+  fixedMonthlySalary: number;
   baseSalary: number;
-  studyAllowance: number;
+  incentive: number;
   bonus: number;
+  customAllowance: number;
   hra: number;
-  lop: number;
-  professionalTax: number;
+  studyAllowance: number;
+  deduction: number;
+  advanceDeduction: number;
   pf: number;
+  tds: number;
+  professionalTax: number;
   insurance: number;
+  useNetPayOverride: boolean;
+  netPayOverride: number;
+  saveAsTemplate: boolean;
 };
 
 function toAmount(value: unknown) {
   return Math.max(0, Number(value) || 0);
 }
 
-function getInitialForm(payroll: Payroll | null): FormState {
-  const earnings = payroll?.earnings && !Array.isArray(payroll.earnings) ? payroll.earnings : undefined;
-  const deductions = payroll?.deductionBreakdown;
-
+function buildForm(payload: PayrollDetailsResponse): FormState {
+  const attendance = payload.payroll.attendanceSummary;
+  const salary = payload.payroll.salaryBreakdown;
+  const hasNetPayOverride = salary.netPayOverride != null;
   return {
-    baseSalary: toAmount(earnings?.basicSalary ?? payroll?.basicSalary ?? payroll?.baseSalary),
-    studyAllowance: toAmount(earnings?.studyAllowance),
-    bonus: toAmount(earnings?.bonus ?? payroll?.bonus ?? payroll?.bonuses ?? payroll?.incentives),
-    hra: toAmount(earnings?.hra),
-    lop: toAmount(deductions?.lop ?? payroll?.deductions),
-    professionalTax: toAmount(deductions?.professionalTax),
-    pf: toAmount(deductions?.pf),
-    insurance: toAmount(deductions?.insurance),
+    presentDays: toAmount(attendance.presentDays),
+    absentDays: toAmount(attendance.absentDays),
+    leaveDays: toAmount(attendance.leaveDays),
+    halfDays: toAmount(attendance.halfDays),
+    overtimeHours: toAmount(attendance.overtimeHours),
+    workingDays: toAmount(attendance.workingDays),
+    payableDays: toAmount(attendance.payableDays),
+    fixedMonthlySalary: toAmount(salary.fixedMonthlySalary),
+    baseSalary: toAmount(salary.baseSalary),
+    incentive: toAmount(salary.incentive),
+    bonus: toAmount(salary.bonus),
+    customAllowance: toAmount(salary.customAllowance),
+    hra: toAmount(salary.hra),
+    studyAllowance: toAmount(salary.studyAllowance),
+    deduction: toAmount(salary.deduction),
+    advanceDeduction: toAmount(salary.advanceDeduction),
+    pf: toAmount(salary.pf),
+    tds: toAmount(salary.tds),
+    professionalTax: toAmount(salary.professionalTax),
+    insurance: toAmount(salary.insurance),
+    useNetPayOverride: hasNetPayOverride,
+    netPayOverride: toAmount(salary.netPayOverride ?? salary.netPay),
+    saveAsTemplate: false,
   };
 }
 
-function getFormFromDefaults(payload: PayrollDetailsResponse["defaultComponents"]): FormState {
-  return {
-    baseSalary: toAmount(payload.earnings.basicSalary),
-    studyAllowance: toAmount(payload.earnings.studyAllowance),
-    bonus: toAmount(payload.earnings.bonus),
-    hra: toAmount(payload.earnings.hra),
-    lop: toAmount(payload.deductionBreakdown.lop),
-    professionalTax: toAmount(payload.deductionBreakdown.professionalTax),
-    pf: toAmount(payload.deductionBreakdown.pf),
-    insurance: toAmount(payload.deductionBreakdown.insurance),
-  };
-}
-
-function CurrencyInput({
+function NumberField({
   label,
   value,
   onChange,
+  prefix,
+  disabled,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  prefix?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
-      <div className="text-sm font-medium text-slate-700">{label}</div>
+      <div className={`text-sm font-medium ${disabled ? "text-slate-400" : "text-slate-700"}`}>{label}</div>
       <div className="relative mt-2">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-          INR
-        </span>
+        {prefix ? (
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+            {prefix}
+          </span>
+        ) : null}
         <input
           type="number"
           min="0"
           step="1"
           value={value}
+          disabled={disabled}
           onChange={(event) => onChange(toAmount(event.target.value))}
-          className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 outline-none ring-indigo-500/15 transition focus:border-indigo-400 focus:ring-4"
+          className={`h-11 w-full rounded-xl border border-slate-200 pr-4 text-sm outline-none ring-indigo-500/15 transition focus:border-indigo-400 focus:ring-4 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-400 ${
+            prefix ? "pl-12" : "pl-4"
+          } ${disabled ? "bg-slate-50 text-slate-400" : "bg-white text-slate-900"}`}
         />
       </div>
     </label>
   );
 }
 
-export default function EditPayrollModal({ isOpen, onClose, payroll, onSuccess }: Props) {
+export default function EditPayrollModal({
+  isOpen,
+  onClose,
+  item,
+  month,
+  onSuccess,
+  onError,
+}: Props) {
   const { firebaseUser } = useAuth();
-  const [form, setForm] = useState<FormState>(getInitialForm(null));
+  const [details, setDetails] = useState<PayrollDetailsResponse | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loadingDefaults, setLoadingDefaults] = useState(false);
-  const [defaultForm, setDefaultForm] = useState<FormState | null>(null);
-
-  useEffect(() => {
-    setForm(getInitialForm(payroll));
-  }, [payroll]);
+  const [finalizing, setFinalizing] = useState(false);
 
   useEffect(() => {
     let active = true;
 
-    async function loadDefaults() {
-      if (!isOpen || !payroll || !firebaseUser) {
+    async function loadDetails() {
+      if (!isOpen || !item || !firebaseUser) {
         if (active) {
-          setDefaultForm(null);
-          setLoadingDefaults(false);
+          setDetails(null);
+          setForm(null);
         }
         return;
       }
 
       try {
-        setLoadingDefaults(true);
+        setLoading(true);
         const token = await firebaseUser.getIdToken();
-        const employeeKey = payroll.employeeId || payroll.uid;
         const searchParams = new URLSearchParams();
-        if (payroll.id) {
-          searchParams.set("payrollId", payroll.id);
+        if (item.payroll?.id) {
+          searchParams.set("payrollId", item.payroll.id);
         }
-
         const response = await fetch(
-          `/api/payroll/${encodeURIComponent(employeeKey)}/${encodeURIComponent(payroll.month)}${
+          `/api/payroll/${encodeURIComponent(item.employee.employeeId)}/${encodeURIComponent(month)}${
             searchParams.size > 0 ? `?${searchParams.toString()}` : ""
           }`,
           {
@@ -131,121 +163,150 @@ export default function EditPayrollModal({ isOpen, onClose, payroll, onSuccess }
             cache: "no-store",
           },
         );
+
         const payload = (await response.json()) as PayrollDetailsResponse | { error?: string };
-
         if (!response.ok) {
-          throw new Error("error" in payload ? payload.error : "Unable to load employee defaults.");
+          throw new Error("error" in payload ? payload.error : "Unable to load payroll.");
         }
 
-        if (active) {
-          setDefaultForm(getFormFromDefaults((payload as PayrollDetailsResponse).defaultComponents));
-        }
+        if (!active) return;
+        setDetails(payload as PayrollDetailsResponse);
+        setForm(buildForm(payload as PayrollDetailsResponse));
       } catch (error: unknown) {
-        if (active) {
-          console.warn(
-            "Unable to load employee payroll defaults:",
-            error instanceof Error ? error.message : "Unknown error",
-          );
-          setDefaultForm(null);
-        }
+        if (!active) return;
+        onError(error instanceof Error ? error.message : "Unable to load payroll.");
       } finally {
         if (active) {
-          setLoadingDefaults(false);
+          setLoading(false);
         }
       }
     }
 
-    void loadDefaults();
-
+    void loadDetails();
     return () => {
       active = false;
     };
-  }, [firebaseUser, isOpen, payroll]);
+  }, [firebaseUser, isOpen, item, month, onError]);
 
-  const totalEarnings = useMemo(
-    () => form.baseSalary + form.studyAllowance + form.bonus + form.hra,
-    [form],
-  );
-  const totalDeductions = useMemo(
-    () => form.lop + form.professionalTax + form.pf + form.insurance,
-    [form],
-  );
-  const netPay = useMemo(
-    () => Math.max(0, totalEarnings - totalDeductions),
-    [totalDeductions, totalEarnings],
-  );
+  const summary = useMemo(() => {
+    if (!form) {
+      return {
+        gross: 0,
+        lop: 0,
+        totalDeductions: 0,
+        computedNet: 0,
+        net: 0,
+      };
+    }
+
+    const perDay = form.baseSalary / Math.max(1, form.workingDays);
+    const lop = Math.round(perDay * form.absentDays);
+    const gross =
+      form.baseSalary +
+      form.incentive +
+      form.bonus +
+      form.customAllowance +
+      form.hra +
+      form.studyAllowance +
+      Math.round((perDay / 8) * form.overtimeHours);
+    const totalDeductions =
+      lop +
+      form.deduction +
+      form.advanceDeduction +
+      form.pf +
+      form.tds +
+      form.professionalTax +
+      form.insurance;
+    const computedNet = Math.max(0, gross - totalDeductions);
+    const net = form.useNetPayOverride ? form.netPayOverride : computedNet;
+
+    return { gross, lop, totalDeductions, computedNet, net };
+  }, [form]);
+
   const validation = useMemo(() => {
-    const blockingIssues: string[] = [];
-    const warnings: string[] = [];
-
-    if (form.baseSalary <= 0) {
-      blockingIssues.push("Basic salary must be greater than 0.");
+    if (!form) {
+      return { canSave: false, issues: ["Payroll form is not ready yet."] };
     }
-
-    if (totalDeductions > totalEarnings) {
-      blockingIssues.push("Total deductions cannot be greater than total earnings.");
+    const issues: string[] = [];
+    if (form.baseSalary <= 0) issues.push("Base salary must be greater than 0.");
+    if (form.workingDays <= 0) issues.push("Working days must be greater than 0.");
+    if (form.presentDays + form.leaveDays + form.halfDays > form.workingDays * 2) {
+      issues.push("Attendance totals look unusually high. Please review working days.");
     }
+    return { canSave: issues.length === 0, issues };
+  }, [form]);
 
-    if (form.lop > form.baseSalary) {
-      warnings.push("LOP is higher than the base salary. Please verify the payroll loss-of-pay amount.");
-    }
-
-    if (netPay === 0 && totalEarnings > 0) {
-      warnings.push("Net pay is 0 after deductions. Please review the entered deduction values.");
-    }
-
-    if (form.professionalTax + form.pf + form.insurance > totalEarnings && totalEarnings > 0) {
-      warnings.push("Statutory deductions are unusually high relative to total earnings.");
-    }
-
-    return {
-      blockingIssues,
-      warnings,
-      canSave: blockingIssues.length === 0,
-    };
-  }, [form, netPay, totalDeductions, totalEarnings]);
-
-  async function handleSave() {
-    if (!payroll || !firebaseUser) return;
-    if (!validation.canSave) return;
+  async function submit(finalizeGeneration: boolean) {
+    if (!firebaseUser || !item || !form) return;
 
     try {
-      setSaving(true);
+      finalizeGeneration ? setFinalizing(true) : setSaving(true);
       const token = await firebaseUser.getIdToken();
-      const result = await updatePayroll(
-        payroll.id,
-        {
-          baseSalary: form.baseSalary,
-          studyAllowance: form.studyAllowance,
-          bonus: form.bonus,
-          hra: form.hra,
-          lop: form.lop,
-          professionalTax: form.professionalTax,
-          pf: form.pf,
-          insurance: form.insurance,
+      const payload: SavePayrollRequest = {
+        employeeId: item.employee.employeeId,
+        month,
+        attendanceOverride: {
+          presentDays: form.presentDays,
+          absentDays: form.absentDays,
+          leaveDays: form.leaveDays,
+          halfDays: form.halfDays,
+          overtimeHours: form.overtimeHours,
+          workingDays: form.workingDays,
+          payableDays: form.payableDays,
         },
-        token,
-        payroll.status === "PENDING_CREATION"
-          ? {
-              uid: payroll.uid,
-              month: payroll.month,
-            }
-          : undefined,
+        salaryOverride: {
+          fixedMonthlySalary: form.fixedMonthlySalary,
+          baseSalary: form.baseSalary,
+          incentive: form.incentive,
+          bonus: form.bonus,
+          customAllowance: form.customAllowance,
+          hra: form.hra,
+          studyAllowance: form.studyAllowance,
+          deduction: form.deduction,
+          advanceDeduction: form.advanceDeduction,
+          pf: form.pf,
+          tds: form.tds,
+          professionalTax: form.professionalTax,
+          insurance: form.insurance,
+          netPayOverride: form.useNetPayOverride ? form.netPayOverride : null,
+        },
+        saveAsTemplate: form.saveAsTemplate,
+        finalizeGeneration,
+      };
+
+      const response = await fetch(
+        `/api/payroll/${encodeURIComponent(item.employee.employeeId)}/${encodeURIComponent(month)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        },
       );
 
-      if (!result.success) {
-        throw new Error(result.error || "Failed to update payroll.");
+      const result = (await response.json()) as PayrollDetailsResponse | { error?: string };
+      if (!response.ok) {
+        throw new Error("error" in result ? result.error : "Unable to save payroll.");
       }
 
-      onSuccess();
+      onSuccess(
+        finalizeGeneration
+          ? "Payroll generated successfully."
+          : "Payroll draft saved successfully.",
+      );
       onClose();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to update payroll.";
-      window.alert(message);
+      onError(error instanceof Error ? error.message : "Unable to save payroll.");
     } finally {
       setSaving(false);
+      setFinalizing(false);
     }
   }
+
+  const versionHistory = details?.versionHistory ?? [];
+  const canGenerate = !details?.exists || details.payroll.status === "DRAFT";
 
   return (
     <Transition show={isOpen} as={Fragment}>
@@ -273,7 +334,7 @@ export default function EditPayrollModal({ isOpen, onClose, payroll, onSuccess }
               leaveFrom="opacity-100 translate-y-0 scale-100"
               leaveTo="opacity-0 translate-y-4 scale-[0.98]"
             >
-              <Dialog.Panel className="w-full max-w-4xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+              <Dialog.Panel className="w-full max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
                 <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
                   <div className="flex items-start gap-3">
                     <div className="rounded-2xl bg-indigo-50 p-2.5 text-indigo-600">
@@ -281,48 +342,14 @@ export default function EditPayrollModal({ isOpen, onClose, payroll, onSuccess }
                     </div>
                     <div>
                       <Dialog.Title className="text-lg font-semibold text-slate-950">
-                        Edit Payroll Components
+                        Edit Payroll
                       </Dialog.Title>
                       <div className="mt-1 text-sm text-slate-500">
-                        Update the earnings and deductions that appear in the payslip.
+                        Save draft overrides before generation or revise a generated payslip with version history.
                       </div>
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          disabled={loadingDefaults || !defaultForm}
-                          onClick={() => {
-                            if (defaultForm) {
-                              setForm(defaultForm);
-                            }
-                          }}
-                          className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {loadingDefaults ? "Loading defaults..." : "Reset to Employee Defaults"}
-                        </button>
-                      </div>
-                      {defaultForm ? (
-                        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
-                          <div className="font-semibold uppercase tracking-[0.14em] text-sky-700">
-                            Employee Profile Defaults
-                          </div>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <div>Basic Salary: INR {Math.round(defaultForm.baseSalary).toLocaleString()}</div>
-                            <div>Study Allowance: INR {Math.round(defaultForm.studyAllowance).toLocaleString()}</div>
-                            <div>Performance Bonus: INR {Math.round(defaultForm.bonus).toLocaleString()}</div>
-                            <div>House Rent Allowance: INR {Math.round(defaultForm.hra).toLocaleString()}</div>
-                            <div>Professional Tax: INR {Math.round(defaultForm.professionalTax).toLocaleString()}</div>
-                            <div>PF: INR {Math.round(defaultForm.pf).toLocaleString()}</div>
-                            <div>Health Insurance: INR {Math.round(defaultForm.insurance).toLocaleString()}</div>
-                            <div>LOP on Reset: INR {Math.round(defaultForm.lop).toLocaleString()}</div>
-                          </div>
-                          <div className="mt-2 text-[11px] text-sky-700">
-                            Reset restores values derived from the employee profile and clears manual overrides in this payroll form.
-                          </div>
-                        </div>
-                      ) : null}
-                      {payroll ? (
+                      {item ? (
                         <div className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
-                          {payroll.userDisplayName || payroll.employeeId || payroll.uid} • {payroll.month}
+                          {item.employee.name} | {item.employee.employeeId} | {month}
                         </div>
                       ) : null}
                     </div>
@@ -337,146 +364,179 @@ export default function EditPayrollModal({ isOpen, onClose, payroll, onSuccess }
                   </button>
                 </div>
 
-                <div className="grid gap-6 p-6 lg:grid-cols-[1fr_1fr_280px]">
-                  <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                    <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Earnings
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">
-                      These values appear directly in the payslip earnings table.
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-400">
-                      Reset uses the current employee profile defaults for salary, allowance, and recurring bonus values.
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      <CurrencyInput
-                        label="Basic Salary"
-                        value={form.baseSalary}
-                        onChange={(value) => setForm((current) => ({ ...current, baseSalary: value }))}
-                      />
-                      <CurrencyInput
-                        label="Study Allowance"
-                        value={form.studyAllowance}
-                        onChange={(value) => setForm((current) => ({ ...current, studyAllowance: value }))}
-                      />
-                      <CurrencyInput
-                        label="Performance Bonus"
-                        value={form.bonus}
-                        onChange={(value) => setForm((current) => ({ ...current, bonus: value }))}
-                      />
-                      <CurrencyInput
-                        label="House Rent Allowance"
-                        value={form.hra}
-                        onChange={(value) => setForm((current) => ({ ...current, hra: value }))}
-                      />
-                    </div>
-                  </section>
-
-                  <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                    <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Deductions
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">
-                      Keep the total deductions lower than or equal to total earnings.
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-400">
-                      Reset uses the employee profile defaults for statutory deductions and clears LOP to 0.
-                    </div>
-                    <div className="mt-4 space-y-4">
-                      <CurrencyInput
-                        label="LOP (Loss of Pay)"
-                        value={form.lop}
-                        onChange={(value) => setForm((current) => ({ ...current, lop: value }))}
-                      />
-                      <CurrencyInput
-                        label="Professional Tax"
-                        value={form.professionalTax}
-                        onChange={(value) => setForm((current) => ({ ...current, professionalTax: value }))}
-                      />
-                      <CurrencyInput
-                        label="PF"
-                        value={form.pf}
-                        onChange={(value) => setForm((current) => ({ ...current, pf: value }))}
-                      />
-                      <CurrencyInput
-                        label="Health Insurance"
-                        value={form.insurance}
-                        onChange={(value) => setForm((current) => ({ ...current, insurance: value }))}
-                      />
-                    </div>
-                  </section>
-
-                  <aside className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-                    <div className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                      Summary
-                    </div>
-                    <div className="mt-5 space-y-4 text-sm">
-                      <div className="flex items-center justify-between gap-4">
-                        <span className="text-slate-600">Total Earnings</span>
-                        <span className="font-semibold text-slate-950">
-                          INR {Math.round(totalEarnings).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-4">
-                        <span className="text-slate-600">Total Deductions</span>
-                        <span className="font-semibold text-slate-950">
-                          INR {Math.round(totalDeductions).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="border-t border-emerald-200 pt-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                          Net Pay
+                {loading || !form || !details ? (
+                  <div className="p-10 text-center text-sm text-slate-500">Loading payroll editor...</div>
+                ) : (
+                  <>
+                    <div className="grid gap-6 p-6 xl:grid-cols-[1.25fr_1.25fr_0.75fr]">
+                      <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+                        <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Attendance Override
                         </div>
-                        <div className="mt-2 text-3xl font-bold tracking-tight text-emerald-900">
-                          INR {Math.round(netPay).toLocaleString()}
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          <NumberField label="Present Days" value={form.presentDays} onChange={(value) => setForm((current) => current ? { ...current, presentDays: value } : current)} />
+                          <NumberField label="Absent Days" value={form.absentDays} onChange={(value) => setForm((current) => current ? { ...current, absentDays: value } : current)} />
+                          <NumberField label="Leave Days" value={form.leaveDays} onChange={(value) => setForm((current) => current ? { ...current, leaveDays: value } : current)} />
+                          <NumberField label="Half Days" value={form.halfDays} onChange={(value) => setForm((current) => current ? { ...current, halfDays: value } : current)} />
+                          <NumberField label="Overtime Hours" value={form.overtimeHours} onChange={(value) => setForm((current) => current ? { ...current, overtimeHours: value } : current)} />
+                          <NumberField label="Working Days" value={form.workingDays} onChange={(value) => setForm((current) => current ? { ...current, workingDays: value } : current)} />
+                          <NumberField label="Payable Days" value={form.payableDays} onChange={(value) => setForm((current) => current ? { ...current, payableDays: value } : current)} />
                         </div>
-                        <div className="mt-2 text-xs text-emerald-800">
-                          (Earnings - Deductions) = ({Math.round(totalEarnings).toLocaleString()} - {Math.round(totalDeductions).toLocaleString()})
-                        </div>
-                      </div>
+                      </section>
 
-                      {validation.blockingIssues.length > 0 ? (
-                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
-                          <div className="font-semibold uppercase tracking-[0.14em]">Fix Before Saving</div>
-                          <div className="mt-2 space-y-1">
-                            {validation.blockingIssues.map((issue) => (
-                              <div key={issue}>{issue}</div>
-                            ))}
+                      <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+                        <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Salary Override
+                        </div>
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          <NumberField label="Fixed Monthly Salary" prefix="INR" value={form.fixedMonthlySalary} onChange={(value) => setForm((current) => current ? { ...current, fixedMonthlySalary: value } : current)} />
+                          <NumberField label="Base Salary" prefix="INR" value={form.baseSalary} onChange={(value) => setForm((current) => current ? { ...current, baseSalary: value } : current)} />
+                          <NumberField label="Incentive" prefix="INR" value={form.incentive} onChange={(value) => setForm((current) => current ? { ...current, incentive: value } : current)} />
+                          <NumberField label="Bonus" prefix="INR" value={form.bonus} onChange={(value) => setForm((current) => current ? { ...current, bonus: value } : current)} />
+                          <NumberField label="Custom Allowance" prefix="INR" value={form.customAllowance} onChange={(value) => setForm((current) => current ? { ...current, customAllowance: value } : current)} />
+                          <NumberField label="HRA" prefix="INR" value={form.hra} onChange={(value) => setForm((current) => current ? { ...current, hra: value } : current)} />
+                          <NumberField label="Study Allowance" prefix="INR" value={form.studyAllowance} onChange={(value) => setForm((current) => current ? { ...current, studyAllowance: value } : current)} />
+                          <NumberField label="Other Deduction" prefix="INR" value={form.deduction} onChange={(value) => setForm((current) => current ? { ...current, deduction: value } : current)} />
+                          <NumberField label="Advance Deduction" prefix="INR" value={form.advanceDeduction} onChange={(value) => setForm((current) => current ? { ...current, advanceDeduction: value } : current)} />
+                          <NumberField label="PF" prefix="INR" value={form.pf} onChange={(value) => setForm((current) => current ? { ...current, pf: value } : current)} />
+                          <NumberField label="TDS" prefix="INR" value={form.tds} onChange={(value) => setForm((current) => current ? { ...current, tds: value } : current)} />
+                          <NumberField label="Professional Tax" prefix="INR" value={form.professionalTax} onChange={(value) => setForm((current) => current ? { ...current, professionalTax: value } : current)} />
+                          <NumberField label="Insurance" prefix="INR" value={form.insurance} onChange={(value) => setForm((current) => current ? { ...current, insurance: value } : current)} />
+                          <label className="sm:col-span-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={form.useNetPayOverride}
+                              onChange={(event) =>
+                                setForm((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        useNetPayOverride: event.target.checked,
+                                        netPayOverride: event.target.checked
+                                          ? summary.computedNet
+                                          : current.netPayOverride,
+                                      }
+                                    : current,
+                                )
+                              }
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                            />
+                            Manually override final net pay for this month
+                          </label>
+                          <NumberField
+                            label="Net Pay Override"
+                            prefix="INR"
+                            value={form.netPayOverride}
+                            disabled={!form.useNetPayOverride}
+                            onChange={(value) => setForm((current) => current ? { ...current, netPayOverride: value } : current)}
+                          />
+                        </div>
+
+                        <label className="mt-4 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={form.saveAsTemplate}
+                            onChange={(event) => setForm((current) => current ? { ...current, saveAsTemplate: event.target.checked } : current)}
+                            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                          />
+                          Apply these salary values to the recurring monthly salary template
+                        </label>
+                      </section>
+
+                      <aside className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                        <div className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                          Summary
+                        </div>
+                        <div className="mt-4 space-y-4 text-sm">
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-slate-600">Gross Salary</span>
+                            <span className="font-semibold text-slate-950">
+                              INR {Math.round(summary.gross).toLocaleString()}
+                            </span>
                           </div>
-                        </div>
-                      ) : null}
-
-                      {validation.warnings.length > 0 ? (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                          <div className="font-semibold uppercase tracking-[0.14em]">Review Warnings</div>
-                          <div className="mt-2 space-y-1">
-                            {validation.warnings.map((warning) => (
-                              <div key={warning}>{warning}</div>
-                            ))}
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-slate-600">LOP</span>
+                            <span className="font-semibold text-slate-950">
+                              INR {Math.round(summary.lop).toLocaleString()}
+                            </span>
                           </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-slate-600">Total Deductions</span>
+                            <span className="font-semibold text-slate-950">
+                              INR {Math.round(summary.totalDeductions).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="border-t border-emerald-200 pt-4">
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                              {form.useNetPayOverride ? "Net Pay Override" : "Net Pay"}
+                            </div>
+                            <div className="mt-2 text-3xl font-bold tracking-tight text-emerald-900">
+                              INR {Math.round(summary.net).toLocaleString()}
+                            </div>
+                            <div className="mt-2 text-xs text-emerald-800/80">
+                              {form.useNetPayOverride
+                                ? `Computed net pay is INR ${Math.round(summary.computedNet).toLocaleString()}, but the manual override will be saved instead.`
+                                : "Net pay is being auto-calculated from earnings and deductions."}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+                            <div className="font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              Version History
+                            </div>
+                            <div className="mt-2 space-y-2">
+                              {versionHistory.length === 0 ? (
+                                <div>No prior versions yet.</div>
+                              ) : (
+                                versionHistory.slice(0, 5).map((version) => (
+                                  <div key={version.id}>
+                                    V{version.version} {version.changeType.toLowerCase()} by {version.changedBy?.name ?? "System"}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+
+                          {validation.issues.length > 0 ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
+                              {validation.issues.map((issue) => (
+                                <div key={issue}>{issue}</div>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
+                      </aside>
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving || finalizing || !validation.canSave}
+                        onClick={() => void submit(false)}
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {saving ? "Saving..." : "Save Draft"}
+                      </button>
+                      {canGenerate ? (
+                        <button
+                          type="button"
+                          disabled={saving || finalizing || !validation.canSave}
+                          onClick={() => void submit(true)}
+                          className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          {finalizing ? "Generating..." : "Save & Generate"}
+                        </button>
                       ) : null}
                     </div>
-                  </aside>
-                </div>
-
-                <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={saving || !validation.canSave}
-                    onClick={() => void handleSave()}
-                    className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {saving ? "Saving..." : "Save Payroll"}
-                  </button>
-                </div>
+                  </>
+                )}
               </Dialog.Panel>
             </Transition.Child>
           </div>

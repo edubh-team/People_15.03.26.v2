@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import DownloadPayslipButton from "@/components/hr/DownloadPayslipButton";
 import PayslipPreviewModal from "@/components/payroll/PayslipPreviewModal";
-import { db } from "@/lib/firebase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { Payroll } from "@/lib/types/hr";
+import type {
+  EmployeePayslipListResponse,
+  PayrollDetailsResponse,
+} from "@/lib/types/payroll";
 
 type Props = {
   uid: string | null;
@@ -13,16 +16,18 @@ type Props = {
 };
 
 export default function EmployeePayslipsPanel({ uid, title = "My Payslips" }: Props) {
-  const [rows, setRows] = useState<Payroll[]>([]);
+  const { firebaseUser } = useAuth();
+  const [rows, setRows] = useState<EmployeePayslipListResponse["items"]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [previewRow, setPreviewRow] = useState<Payroll | null>(null);
+  const [previewDetails, setPreviewDetails] = useState<PayrollDetailsResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     async function loadRows() {
-      if (!db || !uid) {
+      if (!uid || !firebaseUser) {
         if (active) {
           setRows([]);
           setLoading(false);
@@ -33,13 +38,21 @@ export default function EmployeePayslipsPanel({ uid, title = "My Payslips" }: Pr
       try {
         setLoading(true);
         setError(null);
-        const snapshot = await getDocs(query(collection(db, "payroll"), where("uid", "==", uid)));
-        if (!active) return;
+        const token = await firebaseUser.getIdToken();
+        const response = await fetch("/api/payroll/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        });
 
-        const items = snapshot.docs
-          .map((row) => ({ ...(row.data() as Payroll), id: row.id }))
-          .sort((left, right) => right.month.localeCompare(left.month));
-        setRows(items);
+        const payload = (await response.json()) as EmployeePayslipListResponse | { error?: string };
+        if (!response.ok) {
+          throw new Error("error" in payload ? payload.error : "Unable to load payslips.");
+        }
+
+        if (!active) return;
+        setRows((payload as EmployeePayslipListResponse).items);
       } catch (loadError: unknown) {
         if (!active) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load payslips.");
@@ -51,17 +64,45 @@ export default function EmployeePayslipsPanel({ uid, title = "My Payslips" }: Pr
     }
 
     void loadRows();
-
     return () => {
       active = false;
     };
-  }, [uid]);
+  }, [firebaseUser, uid]);
+
+  async function handlePreview(month: string, employeeId: string) {
+    if (!firebaseUser) return;
+
+    try {
+      setPreviewLoading(true);
+      const token = await firebaseUser.getIdToken();
+      const response = await fetch(
+        `/api/payroll/${encodeURIComponent(employeeId)}/${encodeURIComponent(month)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        },
+      );
+
+      const payload = (await response.json()) as PayrollDetailsResponse | { error?: string };
+      if (!response.ok) {
+        throw new Error("error" in payload ? payload.error : "Unable to preview payslip.");
+      }
+
+      setPreviewDetails(payload as PayrollDetailsResponse);
+    } catch (previewError: unknown) {
+      setError(previewError instanceof Error ? previewError.message : "Unable to preview payslip.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   return (
     <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="text-sm font-semibold tracking-tight">{title}</div>
       <div className="mt-1 text-xs text-slate-500">
-        Download system-generated salary slips from your account.
+        View only payslips that HR has sent to your dashboard. Download audit is tracked automatically.
       </div>
 
       {loading ? (
@@ -72,37 +113,57 @@ export default function EmployeePayslipsPanel({ uid, title = "My Payslips" }: Pr
         </div>
       ) : rows.length === 0 ? (
         <div className="mt-4 rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-          Payslips will appear here after payroll is generated for your account.
+          Payslips will appear here after HR sends them to your account.
         </div>
       ) : (
         <div className="mt-4 space-y-3">
           {rows.map((row) => (
             <div
               key={row.id}
-              className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+              className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 lg:flex-row lg:items-center lg:justify-between"
             >
               <div>
                 <div className="text-sm font-semibold text-slate-900">{row.month}</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Net Pay: INR {Number(row.netPay ?? row.netSalary ?? 0).toLocaleString()} | {row.status}
+                  Net Pay: INR {Number(row.netPay).toLocaleString()} | Status: {row.status}
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Downloads: {row.downloadCount} {row.downloadedAt ? `| Last download: ${new Date(row.downloadedAt).toLocaleDateString()}` : ""}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setPreviewRow(row)}
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                  disabled={previewLoading}
+                  onClick={() => void handlePreview(row.month, row.employee.employeeId)}
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Preview
+                  {previewLoading ? "Loading..." : "Preview"}
                 </button>
                 <DownloadPayslipButton
-                  payroll={row}
-                  employee={{
-                    name: row.userDisplayName || row.userEmail || row.uid,
-                    employeeId: row.employeeId || row.uid,
-                    designation: row.designation,
-                    department: row.department,
-                  }}
+                  payroll={
+                    (previewDetails?.payroll &&
+                    previewDetails.employee.employeeId === row.employee.employeeId &&
+                    previewDetails.payroll.month === row.month
+                      ? previewDetails.payroll
+                      : {
+                          id: row.id,
+                          uid: row.employee.uid,
+                          employeeId: row.employee.employeeId,
+                          month: row.month,
+                          baseSalary: row.netPay,
+                          daysPresent: 0,
+                          daysAbsent: 0,
+                          lates: 0,
+                          incentives: 0,
+                          deductions: 0,
+                          netSalary: row.netPay,
+                          status: row.status,
+                          generatedAt: new Date(),
+                          netPay: row.netPay,
+                        }) as Payroll
+                  }
+                  employee={row.employee}
                 />
               </div>
             </div>
@@ -111,19 +172,11 @@ export default function EmployeePayslipsPanel({ uid, title = "My Payslips" }: Pr
       )}
 
       <PayslipPreviewModal
-        isOpen={Boolean(previewRow)}
-        payroll={previewRow}
-        employee={
-          previewRow
-            ? {
-                name: previewRow.userDisplayName || previewRow.userEmail || previewRow.uid,
-                employeeId: previewRow.employeeId || previewRow.uid,
-                designation: previewRow.designation,
-                department: previewRow.department,
-              }
-            : null
-        }
-        onClose={() => setPreviewRow(null)}
+        isOpen={Boolean(previewDetails)}
+        payroll={previewDetails?.payroll ?? null}
+        employee={previewDetails?.employee ?? null}
+        onClose={() => setPreviewDetails(null)}
+        onError={(message) => setError(message)}
       />
     </div>
   );

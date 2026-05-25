@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Partial<BulkGeneratePayrollRequest>;
     const month = typeof body.month === "string" ? body.month : "";
-    const payload = await generatePayrollBatch(verified.value.adminDb, month);
+    const payload = await generatePayrollBatch(verified.value.adminDb, month, verified.value.userDoc);
 
     return NextResponse.json(payload, {
       status: 201,

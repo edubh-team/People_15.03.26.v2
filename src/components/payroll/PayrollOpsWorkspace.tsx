@@ -8,7 +8,12 @@ import PayrollDashboardCards from "@/components/payroll/PayrollDashboardCards";
 import PayslipPreviewModal from "@/components/payroll/PayslipPreviewModal";
 import PayrollTable from "@/components/payroll/PayrollTable";
 import PayrollToast from "@/components/payroll/PayrollToast";
-import type { BulkGeneratePayrollResponse, PayrollListItem, PayrollListResponse } from "@/lib/types/payroll";
+import type {
+  BulkGeneratePayrollResponse,
+  PayrollDetailsResponse,
+  PayrollListItem,
+  PayrollListResponse,
+} from "@/lib/types/payroll";
 
 type ToastState = {
   tone: "success" | "error" | "info";
@@ -26,9 +31,15 @@ const emptyState: PayrollListResponse = {
     totalEmployees: 0,
     totalPayout: 0,
     payrollRecords: 0,
+    drafts: 0,
+    sent: 0,
   },
   items: [],
 };
+
+function buildActionKey(action: string, uid: string) {
+  return `${action}:${uid}`;
+}
 
 export default function PayrollOpsWorkspace() {
   const { firebaseUser } = useAuth();
@@ -40,6 +51,7 @@ export default function PayrollOpsWorkspace() {
   const [toast, setToast] = useState<ToastState>(null);
   const [previewItem, setPreviewItem] = useState<PayrollListItem | null>(null);
   const [editingItem, setEditingItem] = useState<PayrollListItem | null>(null);
+  const [actionLoadingKey, setActionLoadingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -66,7 +78,6 @@ export default function PayrollOpsWorkspace() {
       });
 
       const payload = (await response.json()) as PayrollListResponse | { error?: string };
-
       if (!response.ok) {
         throw new Error("error" in payload ? payload.error : "Unable to load payroll.");
       }
@@ -92,13 +103,14 @@ export default function PayrollOpsWorkspace() {
     [data.summary.payrollRecords, data.summary.totalEmployees],
   );
   const pendingGeneratableCount = useMemo(
-    () => data.items.filter((item) => !item.payroll && item.status === "NOT_GENERATED").length,
+    () =>
+      data.items.filter((item) => !item.payroll && item.status === "NOT_GENERATED").length,
     [data.items],
   );
 
   function buildBulkToastMessage(payload: BulkGeneratePayrollResponse) {
     const parts = [
-      `Generated ${payload.summary.generated}`,
+      `generated ${payload.summary.generated}`,
       `already done ${payload.summary.alreadyGenerated}`,
       `missing attendance ${payload.summary.missingAttendance}`,
       `zero salary ${payload.summary.zeroSalary}`,
@@ -113,7 +125,6 @@ export default function PayrollOpsWorkspace() {
 
   async function handleBulkGenerate() {
     if (!firebaseUser || bulkGenerating) return;
-
     if (pendingGeneratableCount === 0) {
       setToast({
         tone: "info",
@@ -154,6 +165,45 @@ export default function PayrollOpsWorkspace() {
     }
   }
 
+  async function runEmployeeAction(item: PayrollListItem, action: "approve" | "send") {
+    if (!firebaseUser) return;
+
+    try {
+      setActionLoadingKey(buildActionKey(action, item.employee.uid));
+      const token = await firebaseUser.getIdToken();
+      const response = await fetch(
+        `/api/payroll/${encodeURIComponent(item.employee.employeeId)}/${encodeURIComponent(selectedMonth)}/${action}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const payload = (await response.json()) as PayrollDetailsResponse | { error?: string };
+      if (!response.ok) {
+        throw new Error("error" in payload ? payload.error : `Unable to ${action} payroll.`);
+      }
+
+      setToast({
+        tone: "success",
+        message:
+          action === "approve"
+            ? `Payroll approved for ${item.employee.name}.`
+            : `Payslip sent to ${item.employee.name}.`,
+      });
+      await loadPayroll(selectedMonth, false);
+    } catch (error: unknown) {
+      setToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : `Unable to ${action} payroll.`,
+      });
+    } finally {
+      setActionLoadingKey(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -163,10 +213,10 @@ export default function PayrollOpsWorkspace() {
               Payroll Ops
             </div>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-              Dynamic Payroll Workspace
+              Enterprise Payroll Workspace
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Generate payroll from employee salary and attendance, track live records, and download system-generated payslips.
+              Control attendance and salary overrides, generate month-safe payroll, version edits, approve records, and send payslips to employees.
             </p>
           </div>
 
@@ -208,7 +258,8 @@ export default function PayrollOpsWorkspace() {
           <span className="rounded-full bg-slate-100 px-3 py-1">Month {selectedMonth}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1">Records {payrollRecordsLabel}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1">Pending {pendingGeneratableCount}</span>
-          <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Live</span>
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">Drafts {data.summary.drafts}</span>
+          <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-700">Sent {data.summary.sent}</span>
         </div>
       </section>
 
@@ -221,16 +272,23 @@ export default function PayrollOpsWorkspace() {
         items={data.items}
         loading={loading}
         reloading={reloading}
+        actionLoadingKey={actionLoadingKey}
         onGenerated={() => {
           void loadPayroll(selectedMonth, false);
         }}
         onToast={(message, tone = "info" as const) => setToast({ message, tone })}
         onEdit={(item) => setEditingItem(item)}
         onPreview={(item) => setPreviewItem(item)}
+        onApprove={(item) => {
+          void runEmployeeAction(item, "approve");
+        }}
+        onSend={(item) => {
+          void runEmployeeAction(item, "send");
+        }}
       />
 
       <PayslipPreviewModal
-        isOpen={Boolean(previewItem)}
+        isOpen={Boolean(previewItem?.payroll)}
         payroll={previewItem?.payroll ?? null}
         employee={previewItem?.employee ?? null}
         onClose={() => setPreviewItem(null)}
@@ -239,13 +297,15 @@ export default function PayrollOpsWorkspace() {
 
       <EditPayrollModal
         isOpen={Boolean(editingItem)}
-        payroll={editingItem?.payroll ?? null}
+        item={editingItem}
+        month={selectedMonth}
         onClose={() => setEditingItem(null)}
-        onSuccess={() => {
+        onSuccess={(message) => {
           setEditingItem(null);
-          setToast({ message: "Payroll components updated successfully.", tone: "success" });
+          setToast({ message, tone: "success" });
           void loadPayroll(selectedMonth, false);
         }}
+        onError={(message) => setToast({ message, tone: "error" })}
       />
     </div>
   );

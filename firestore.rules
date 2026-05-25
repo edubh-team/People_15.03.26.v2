@@ -495,6 +495,96 @@ service cloud.firestore {
       }
     }
 
+    match /salary_templates/{templateId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer() ||
+        request.auth.uid == resource.data.uid
+      );
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow delete: if request.auth != null && (isSuperAdmin() || isAdmin() || isHR());
+    }
+
+    match /attendance_summary/{summaryId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer() ||
+        request.auth.uid == resource.data.uid
+      );
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow delete: if false;
+    }
+
+    match /payroll_records/{recordId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer() ||
+        resource.data.uid == request.auth.uid
+      );
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow delete: if false;
+    }
+
+    match /payroll_versions/{versionId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer() ||
+        resource.data.uid == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow update, delete: if false;
+    }
+
+    match /employee_notifications/{notificationId} {
+      allow read: if request.auth != null && (
+        resource.data.recipientUid == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR()
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow update: if request.auth != null && (
+        resource.data.recipientUid == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR()
+      );
+      allow delete: if false;
+    }
+
     match /attendance/{attendanceId} {
        allow read: if request.auth != null;
        allow write: if request.auth != null && (request.auth.uid == resource.data.uid || request.auth.uid == resource.data.userId || isSuperAdmin() || isHR());

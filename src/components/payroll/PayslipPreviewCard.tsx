@@ -33,6 +33,9 @@ export default function PayslipPreviewCard({ payroll, employee }: Props) {
 
           <div className="max-w-[520px] text-left lg:text-right">
             <div className="text-base font-medium leading-7 text-slate-900">{payslip.netPaySummaryLine}</div>
+            <div className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {payslip.monthLabel} | {payslip.statusLabel}
+            </div>
           </div>
         </div>
       </div>
@@ -125,8 +128,9 @@ export default function PayslipPreviewCard({ payroll, employee }: Props) {
           </table>
         </div>
 
-        <div className="mt-5 text-center text-sm text-slate-500">
-          This is a computer-generated slip no need of any signature
+        <div className="mt-5 flex items-center justify-between gap-4 text-sm text-slate-500">
+          <span>This is a computer-generated payslip.</span>
+          <span className="font-semibold text-slate-700">{payslip.signatureLabel}</span>
         </div>
       </div>
     </div>
