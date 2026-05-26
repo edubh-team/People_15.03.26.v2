@@ -85,6 +85,7 @@ const PERSONAL_GROUP: ShellNavGroup = {
   label: "MY ACCOUNT",
   children: [
     { label: "My Profile", href: "/profile/me", icon: "settings" },
+    { label: "My Payslips", href: "/employee/payslips", icon: "money" },
     { label: "Knowledge Center", href: CANONICAL_DOMAIN_ROUTES.KNOWLEDGE_CENTER, icon: "reports" },
     { label: "Messages", href: "/chat", icon: "chat" },
   ],

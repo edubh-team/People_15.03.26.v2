@@ -9,7 +9,11 @@ import type {
   AttendanceOverrideInput,
   AttendanceRecord,
   BulkGeneratePayrollResponse,
+  EmployeePayslipDetailsResponse,
+  EmployeePayslipDownloadEvent,
+  EmployeePayslipListItem,
   EmployeePayslipListResponse,
+  EmployeePayslipRecord,
   GeneratePayrollRequest,
   PayrollActor,
   PayrollDetailsResponse,
@@ -23,6 +27,7 @@ import type {
   PayrollVersionHistoryItem,
   SalaryOverrideInput,
   SalaryTemplate,
+  SendPayslipRequest,
   SavePayrollRequest,
 } from "@/lib/types/payroll";
 import type { UserDoc } from "@/lib/types/user";
@@ -32,6 +37,7 @@ const PAYROLL_VERSIONS = "payroll_versions";
 const SALARY_TEMPLATES = "salary_templates";
 const ATTENDANCE_SUMMARY = "attendance_summary";
 const EMPLOYEE_NOTIFICATIONS = "employee_notifications";
+const EMPLOYEE_PAYSLIPS = "employee_payslips";
 const LEGACY_PAYROLL = "payroll";
 
 const PAYROLL_MONTH_REGEX = /^\d{4}-\d{2}$/;
@@ -139,6 +145,25 @@ function buildPayrollDocId(uid: string, month: string) {
 function buildPdfUrl(employeeId: string, month: string, payrollId: string) {
   const query = new URLSearchParams({ payrollId });
   return `/api/payroll/${encodeURIComponent(employeeId)}/${encodeURIComponent(month)}/pdf?${query.toString()}`;
+}
+
+function getPayrollMonthParts(month: string) {
+  const normalized = normalizeMonthKey(month);
+  const [yearText, monthText] = normalized.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText);
+  const monthName = new Intl.DateTimeFormat("en-IN", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthIndex - 1, 1)));
+
+  return {
+    month: normalized,
+    year,
+    monthIndex,
+    monthName,
+  };
 }
 
 function deriveSalaryTemplate(user: UserDoc, month: string, actor?: PayrollActor | null): SalaryTemplate {
@@ -344,6 +369,30 @@ function normalizeDownloadHistory(value: unknown): PayrollDownloadEvent[] {
   }));
 }
 
+function normalizeEmployeePayslipDownloadHistory(value: unknown): EmployeePayslipDownloadEvent[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => ({
+    downloadedAt:
+      toDate(row && typeof row === "object" ? (row as { downloadedAt?: unknown }).downloadedAt : null)?.toISOString() ??
+      null,
+    downloadedBy:
+      row && typeof row === "object" && (row as { downloadedBy?: unknown }).downloadedBy
+        ? {
+            uid: String((((row as { downloadedBy?: { uid?: unknown } }).downloadedBy)?.uid ?? "")),
+            name:
+              String((((row as { downloadedBy?: { name?: unknown } }).downloadedBy)?.name ?? "")) || null,
+            employeeId:
+              String((((row as { downloadedBy?: { employeeId?: unknown } }).downloadedBy)?.employeeId ?? "")) || null,
+            role:
+              String((((row as { downloadedBy?: { role?: unknown } }).downloadedBy)?.role ?? "")) || null,
+          }
+        : null,
+    ip: row && typeof row === "object" ? String((row as { ip?: unknown }).ip ?? "") || null : null,
+    device:
+      row && typeof row === "object" ? String((row as { device?: unknown }).device ?? "") || null : null,
+  }));
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -390,6 +439,47 @@ function hydratePayrollRecord(snapshot: DocumentSnapshot | QueryDocumentSnapshot
     notificationId: data.notificationId ?? null,
     version: Math.max(1, roundCurrency(data.version)),
     locked: data.locked !== false,
+  };
+}
+
+function hydrateEmployeePayslipRecord(
+  snapshot: DocumentSnapshot | QueryDocumentSnapshot | null,
+): EmployeePayslipRecord | null {
+  if (!snapshot?.exists) return null;
+  const data = snapshot.data() as Partial<EmployeePayslipRecord>;
+
+  return {
+    id: snapshot.id,
+    payrollRecordId: String(data.payrollRecordId ?? snapshot.id),
+    employeeId: String(data.employeeId ?? ""),
+    uid: String(data.uid ?? ""),
+    month: String(data.month ?? ""),
+    year: roundCurrency(data.year),
+    monthName: String(data.monthName ?? data.month ?? ""),
+    grossSalary: roundCurrency(data.grossSalary),
+    deductions: roundCurrency(data.deductions),
+    netSalary: roundCurrency(data.netSalary),
+    pdfUrl: typeof data.pdfUrl === "string" ? data.pdfUrl : null,
+    status: data.status === "downloaded" ? "downloaded" : "sent",
+    sentAt: toDate(data.sentAt)?.toISOString() ?? null,
+    sentBy: (data.sentBy as PayrollActor | null | undefined) ?? null,
+    viewedAt: toDate(data.viewedAt)?.toISOString() ?? null,
+    downloadCount: roundCurrency(data.downloadCount),
+    downloadHistory: normalizeEmployeePayslipDownloadHistory(data.downloadHistory),
+    notificationId: typeof data.notificationId === "string" ? data.notificationId : null,
+    employee: (data.employee as PayrollEmployeeRecord | undefined) ?? {
+      id: String(data.uid ?? ""),
+      uid: String(data.uid ?? ""),
+      name: "",
+      email: null,
+      employeeId: String(data.employeeId ?? ""),
+      designation: null,
+      department: null,
+      salary: 0,
+      joiningDate: null,
+    },
+    createdAt: toDate(data.createdAt) ?? null,
+    updatedAt: toDate(data.updatedAt) ?? null,
   };
 }
 
@@ -512,6 +602,114 @@ async function findPayrollRecord(
     .get();
 
   return fallback.empty ? null : fallback.docs[0];
+}
+
+async function readEmployeePayslipRecord(
+  adminDb: Firestore,
+  payrollRecordId: string,
+) {
+  const direct = await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payrollRecordId).get();
+  return hydrateEmployeePayslipRecord(direct);
+}
+
+function serializeEmployeePayslipRecord(record: EmployeePayslipRecord): EmployeePayslipListItem {
+  return {
+    id: record.id,
+    payrollRecordId: record.payrollRecordId,
+    employeeId: record.employeeId,
+    uid: record.uid,
+    month: record.month,
+    year: record.year,
+    monthName: record.monthName,
+    grossSalary: record.grossSalary,
+    deductions: record.deductions,
+    netSalary: record.netSalary,
+    pdfUrl: record.pdfUrl,
+    status: record.status,
+    sentAt: record.sentAt,
+    sentBy: record.sentBy ?? null,
+    viewedAt: record.viewedAt,
+    downloadCount: record.downloadCount,
+    downloadHistory: record.downloadHistory,
+    notificationId: record.notificationId ?? null,
+    employee: record.employee,
+  };
+}
+
+function buildEmployeeNotificationPayload(input: {
+  notificationId: string;
+  payroll: PayrollRecord;
+  actor: PayrollActor | null;
+  payslipId: string;
+  createdAt: Date;
+}) {
+  return {
+    id: input.notificationId,
+    recipientUid: input.payroll.uid,
+    employeeId: input.payroll.employee.employeeId,
+    title: "Payslip available",
+    message: `Your ${getPayrollMonthParts(input.payroll.month).monthName} payslip is available for download.`,
+    body: `Your ${getPayrollMonthParts(input.payroll.month).monthName} payslip is available for download.`,
+    type: "PAYSLIP",
+    month: input.payroll.month,
+    referenceId: input.payslipId,
+    payrollRecordId: input.payroll.id,
+    payslipId: input.payslipId,
+    isRead: false,
+    read: false,
+    createdAt: input.createdAt,
+    sentBy: input.actor,
+  };
+}
+
+function buildEmployeePayslipPayload(input: {
+  payroll: PayrollRecord;
+  existing?: EmployeePayslipRecord | null;
+  actor: PayrollActor | null;
+  sentAt: Date;
+  notificationId: string | null;
+  status?: EmployeePayslipRecord["status"];
+}) {
+  const monthParts = getPayrollMonthParts(input.payroll.month);
+  const employeeId =
+    input.payroll.employee.employeeId?.trim() ||
+    input.payroll.employeeId?.trim() ||
+    input.payroll.uid;
+  const uid = input.payroll.uid?.trim() || input.payroll.employee.uid?.trim() || employeeId;
+  return {
+    id: input.payroll.id,
+    payrollRecordId: input.payroll.id,
+    employeeId,
+    uid,
+    month: input.payroll.month,
+    year: monthParts.year,
+    monthName: monthParts.monthName,
+    grossSalary: roundCurrency(input.payroll.grossSalary ?? input.payroll.salaryBreakdown.grossSalary),
+    deductions: roundCurrency(input.payroll.deductions ?? input.payroll.salaryBreakdown.totalDeductions),
+    netSalary: roundCurrency(input.payroll.netPay ?? input.payroll.salaryBreakdown.netPay),
+    pdfUrl:
+      input.payroll.pdfUrl ??
+      buildPdfUrl(input.payroll.employee.employeeId, input.payroll.month, input.payroll.id),
+    status: input.status ?? input.existing?.status ?? "sent",
+    sentAt: input.sentAt,
+    sentBy: input.actor,
+    viewedAt: input.existing?.viewedAt ?? null,
+    downloadCount: input.existing?.downloadCount ?? 0,
+    downloadHistory: input.existing?.downloadHistory ?? [],
+    createdAt: input.existing?.createdAt ?? input.sentAt,
+    updatedAt: input.sentAt,
+    employee: {
+      ...input.payroll.employee,
+      employeeId,
+      uid,
+    },
+    notificationId: input.notificationId,
+  } satisfies Omit<EmployeePayslipRecord, "sentAt" | "viewedAt" | "createdAt" | "updatedAt"> & {
+    sentAt: Date;
+    viewedAt: string | null;
+    createdAt: Date | string | null;
+    updatedAt: Date;
+  };
 }
 
 function buildPayrollVersionHistoryItem(input: {
@@ -827,6 +1025,39 @@ async function buildPayrollContext(
   };
 }
 
+function buildFallbackAttendanceRecord(employee: PayrollEmployeeRecord, month: string): AttendanceRecord {
+  return {
+    employeeId: employee.employeeId,
+    uid: employee.uid,
+    month,
+    presentDays: 0,
+    absentDays: DEFAULT_WORKING_DAYS,
+    daysPresent: 0,
+    daysAbsent: DEFAULT_WORKING_DAYS,
+    leavesApproved: 0,
+    totalWorkingDays: DEFAULT_WORKING_DAYS,
+    leaveDays: 0,
+    halfDays: 0,
+    overtimeHours: 0,
+    workingDays: DEFAULT_WORKING_DAYS,
+    payableDays: 0,
+    lateCount: 0,
+    attendanceTrackedDays: 0,
+    explicitAbsentDays: 0,
+    totalWorkedMinutes: 0,
+    totalSessions: 0,
+    attendanceCorrectionCount: 0,
+    attendanceCorrectionPendingCount: 0,
+    attendanceCorrectionReasons: [],
+    attendanceCorrectionSummary: null,
+    paidLeaveDays: 0,
+    leaveAllowanceDays: 0,
+    leaveExcessDays: 0,
+    unpaidLeaveDays: 0,
+    autoCalculatedAt: null,
+  } satisfies AttendanceRecord;
+}
+
 function mergeManualOverrides(
   current: PayrollManualOverrides | null | undefined,
   input: PayrollManualOverrides | null | undefined,
@@ -893,16 +1124,12 @@ export async function savePayrollRecord(
     );
   }
 
-  if (!context.attendanceSummary) {
-    throw new PayrollServiceError(
-      `Attendance is missing for ${context.employee.name} in ${context.month}.`,
-      422,
-    );
-  }
+  const attendanceSummary =
+    context.attendanceSummary ?? buildFallbackAttendanceRecord(context.employee, context.month);
 
   const baseRecord = buildEphemeralPayrollRecord({
     employee: context.employee,
-    attendanceSummary: context.attendanceSummary,
+    attendanceSummary,
     salaryTemplate: nextTemplate,
     manualOverrides,
     month: context.month,
@@ -1117,43 +1344,8 @@ export async function getPayrollDetails(
     payrollId: options?.payrollId,
   });
   const existingManualOverrides = context.payroll ? context.payroll.manualOverrides : {};
-
-  if (!context.attendanceSummary && !context.payroll) {
-    throw new PayrollServiceError("Payroll record not found.", 404);
-  }
-
   const fallbackAttendance =
-    context.attendanceSummary ??
-    ({
-      employeeId: context.employee.employeeId,
-      uid: context.employee.uid,
-      month: context.month,
-      presentDays: 0,
-      absentDays: DEFAULT_WORKING_DAYS,
-      daysPresent: 0,
-      daysAbsent: DEFAULT_WORKING_DAYS,
-      leavesApproved: 0,
-      totalWorkingDays: DEFAULT_WORKING_DAYS,
-      leaveDays: 0,
-      halfDays: 0,
-      overtimeHours: 0,
-      workingDays: DEFAULT_WORKING_DAYS,
-      payableDays: 0,
-      lateCount: 0,
-      attendanceTrackedDays: 0,
-      explicitAbsentDays: 0,
-      totalWorkedMinutes: 0,
-      totalSessions: 0,
-      attendanceCorrectionCount: 0,
-      attendanceCorrectionPendingCount: 0,
-      attendanceCorrectionReasons: [],
-      attendanceCorrectionSummary: null,
-      paidLeaveDays: 0,
-      leaveAllowanceDays: 0,
-      leaveExcessDays: 0,
-      unpaidLeaveDays: 0,
-      autoCalculatedAt: null,
-    } satisfies AttendanceRecord);
+    context.attendanceSummary ?? buildFallbackAttendanceRecord(context.employee, context.month);
 
   const payroll = normalizePayrollRecordWithContext({
     payroll: context.payroll
@@ -1349,8 +1541,11 @@ export async function sendPayrollToEmployee(
   employeeKey: string,
   monthInput: string,
   actor: Pick<UserDoc, "uid" | "displayName" | "email" | "employeeId" | "role" | "orgRole">,
+  options?: { resend?: boolean; payrollId?: string },
 ) {
-  const details = await getPayrollDetails(adminDb, employeeKey, monthInput);
+  const details = await getPayrollDetails(adminDb, employeeKey, monthInput, {
+    payrollId: options?.payrollId,
+  });
   if (!details.exists) {
     throw new PayrollServiceError("Generate payroll before sending it.", 409);
   }
@@ -1358,74 +1553,202 @@ export async function sendPayrollToEmployee(
     throw new PayrollServiceError("Generate payroll before sending it.", 409);
   }
 
+  const resend = options?.resend === true;
   const actorInfo = buildActor(actor);
   const current = details.payroll;
-  await writeVersionSnapshot(adminDb, current, actorInfo, "SENT");
+  const existingPayslip = await readEmployeePayslipRecord(adminDb, current.id);
+  const alreadySent = Boolean(existingPayslip) || current.status === "SENT" || current.status === "DOWNLOADED";
+
+  if (!resend && alreadySent) {
+    throw new PayrollServiceError("Already Sent", 409);
+  }
+
+  if (
+    current.status !== "GENERATED" &&
+    current.status !== "APPROVED" &&
+    current.status !== "SENT" &&
+    current.status !== "DOWNLOADED"
+  ) {
+    throw new PayrollServiceError("Payroll must be generated or approved before sending.", 409);
+  }
+
+  const now = new Date();
 
   const notificationRef = adminDb.collection(EMPLOYEE_NOTIFICATIONS).doc();
-  const notificationPayload = {
-    id: notificationRef.id,
-    recipientUid: current.uid,
-    employeeId: current.employee.employeeId,
-    title: `Payslip ready for ${current.month}`,
-    body: `Your payroll for ${current.month} is now available for download.`,
-    month: current.month,
-    payrollRecordId: current.id,
-    read: false,
-    createdAt: new Date(),
-    sentBy: actorInfo,
-  };
+  const notificationPayload = buildEmployeeNotificationPayload({
+    notificationId: notificationRef.id,
+    payroll: current,
+    actor: actorInfo,
+    payslipId: current.id,
+    createdAt: now,
+  });
+  const nextPayslipStatus: EmployeePayslipRecord["status"] =
+    existingPayslip?.status === "downloaded" || current.status === "DOWNLOADED"
+      ? "downloaded"
+      : "sent";
+  const payslipPayload = buildEmployeePayslipPayload({
+    payroll: current,
+    existing: existingPayslip,
+    actor: actorInfo,
+    sentAt: now,
+    notificationId: notificationRef.id,
+    status: nextPayslipStatus,
+  });
 
   await Promise.all([
     notificationRef.set(stripUndefinedDeep(notificationPayload)),
     adminDb.collection("notifications").doc(notificationRef.id).set(stripUndefinedDeep(notificationPayload)),
+    adminDb.collection(EMPLOYEE_PAYSLIPS).doc(current.id).set(stripUndefinedDeep(payslipPayload), { merge: true }),
   ]);
 
-  const updated: PayrollRecord = {
-    ...current,
-    status: "SENT",
-    version: current.version + 1,
-    sentAt: new Date(),
-    sentBy: actorInfo,
-    editedBy: actorInfo,
-    updatedAt: new Date(),
-    isVisibleToEmployee: true,
-    notificationId: notificationRef.id,
-  };
+  if (current.status === "GENERATED" || current.status === "APPROVED" || !alreadySent) {
+    await writeVersionSnapshot(adminDb, current, actorInfo, "SENT");
 
-  await adminDb.collection(PAYROLL_RECORDS).doc(current.id).set(stripUndefinedDeep(updated), { merge: true });
-  await syncLegacyPayrollDoc(adminDb, updated);
+    const updated: PayrollRecord = {
+      ...current,
+      status: "SENT",
+      version: current.version + 1,
+      sentAt: now,
+      sentBy: actorInfo,
+      editedBy: actorInfo,
+      updatedAt: now,
+      isVisibleToEmployee: true,
+      notificationId: notificationRef.id,
+    };
+
+    await adminDb.collection(PAYROLL_RECORDS).doc(current.id).set(stripUndefinedDeep(updated), { merge: true });
+    await syncLegacyPayrollDoc(adminDb, updated);
+    return getPayrollDetails(adminDb, employeeKey, monthInput, { payrollId: current.id });
+  }
+
+  await adminDb.collection(PAYROLL_RECORDS).doc(current.id).set(
+    stripUndefinedDeep({
+      isVisibleToEmployee: true,
+      notificationId: notificationRef.id,
+      updatedAt: now,
+    }),
+    { merge: true },
+  );
   return getPayrollDetails(adminDb, employeeKey, monthInput, { payrollId: current.id });
+}
+
+export async function resendPayrollToEmployee(
+  adminDb: Firestore,
+  input: SendPayslipRequest,
+  actor: Pick<UserDoc, "uid" | "displayName" | "email" | "employeeId" | "role" | "orgRole">,
+) {
+  return sendPayrollToEmployee(adminDb, input.employeeId, input.month, actor, {
+    resend: true,
+    payrollId: input.payrollRecordId ?? undefined,
+  });
 }
 
 export async function listEmployeePayslips(
   adminDb: Firestore,
   requester: Pick<UserDoc, "uid" | "employeeId">,
 ): Promise<EmployeePayslipListResponse> {
-  const snapshot = await adminDb
-    .collection(PAYROLL_RECORDS)
-    .where("uid", "==", requester.uid)
-    .get();
+  const identityKeys = Array.from(
+    new Set([requester.uid?.trim(), requester.employeeId?.trim()].filter(Boolean) as string[]),
+  );
 
-  const items = snapshot.docs
-    .map((row) => hydratePayrollRecord(row))
-    .filter((row): row is PayrollRecord => Boolean(row))
-    .filter((row) => row.isVisibleToEmployee && (row.status === "SENT" || row.status === "DOWNLOADED"))
+  const payslipSnapshots = await Promise.all(
+    identityKeys.map((key) =>
+      adminDb
+        .collection(EMPLOYEE_PAYSLIPS)
+        .where(key === requester.uid?.trim() ? "uid" : "employeeId", "==", key)
+        .get(),
+    ),
+  );
+
+  const rowsById = new Map<string, EmployeePayslipRecord>();
+  for (const snapshot of payslipSnapshots) {
+    for (const row of snapshot.docs) {
+      const hydrated = hydrateEmployeePayslipRecord(row);
+      if (!hydrated || !matchesEmployeeIdentity(hydrated, requester)) {
+        continue;
+      }
+
+      rowsById.set(hydrated.id, hydrated);
+    }
+  }
+
+  let rows = Array.from(rowsById.values());
+
+  if (rows.length === 0) {
+    const payrollSnapshots = await Promise.all(
+      identityKeys.map((key) =>
+        adminDb
+          .collection(PAYROLL_RECORDS)
+          .where(key === requester.uid?.trim() ? "uid" : "employeeId", "==", key)
+          .get(),
+      ),
+    );
+    const visiblePayrolls = payrollSnapshots
+      .flatMap((snapshot) => snapshot.docs)
+      .map((row) => hydratePayrollRecord(row))
+      .filter((row): row is PayrollRecord => Boolean(row))
+      .filter((row) => matchesEmployeeIdentity(row, requester))
+      .filter((row) => row.isVisibleToEmployee && (row.status === "SENT" || row.status === "DOWNLOADED"));
+
+    for (const payroll of visiblePayrolls) {
+      const payload = buildEmployeePayslipPayload({
+        payroll,
+        existing: null,
+        actor: payroll.sentBy ?? payroll.generatedBy ?? null,
+        sentAt: payroll.sentAt ?? toDate(payroll.generatedAt) ?? new Date(),
+        notificationId: payroll.notificationId ?? null,
+        status: payroll.status === "DOWNLOADED" ? "downloaded" : "sent",
+      });
+      await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payroll.id).set(stripUndefinedDeep(payload), { merge: true });
+      const created = await readEmployeePayslipRecord(adminDb, payroll.id);
+      if (created && matchesEmployeeIdentity(created, requester)) {
+        rowsById.set(created.id, created);
+      }
+    }
+  }
+
+  rows = Array.from(rowsById.values());
+
+  const items = rows
     .sort((left, right) => right.month.localeCompare(left.month))
-    .map((row) => ({
-      id: row.id,
-      month: row.month,
-      status: row.status,
-      netPay: row.netPay,
-      pdfUrl: row.pdfUrl,
-      version: row.version,
-      sentAt: row.sentAt?.toISOString() ?? null,
-      downloadedAt: row.downloadedAt?.toISOString() ?? null,
-      downloadCount: row.downloadCount,
-      employee: row.employee,
-    }));
+    .map(serializeEmployeePayslipRecord);
 
   return { items };
+}
+
+export async function getEmployeePayslipDetails(
+  adminDb: Firestore,
+  payslipId: string,
+  requester: Pick<UserDoc, "uid" | "employeeId">,
+): Promise<EmployeePayslipDetailsResponse> {
+  const payslipSnap = await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payslipId).get();
+  const payslip = hydrateEmployeePayslipRecord(payslipSnap);
+  if (!payslip) {
+    throw new PayrollServiceError("Payslip not found.", 404);
+  }
+  if (payslip.uid !== requester.uid && payslip.employeeId !== requester.employeeId) {
+    throw new PayrollServiceError("Forbidden", 403);
+  }
+
+  const details = await getPayrollDetails(adminDb, payslip.employeeId, payslip.month, {
+    payrollId: payslip.payrollRecordId,
+  });
+
+  await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payslip.id).set(
+    stripUndefinedDeep({
+      viewedAt: new Date(),
+      updatedAt: new Date(),
+    }),
+    { merge: true },
+  );
+
+  return {
+    payslip: {
+      ...serializeEmployeePayslipRecord(payslip),
+      viewedAt: new Date().toISOString(),
+    },
+    payroll: details.payroll,
+  };
 }
 
 export async function recordPayrollDownload(
@@ -1471,6 +1794,62 @@ export async function recordPayrollDownload(
   return updated;
 }
 
+export async function recordEmployeePayslipDownload(
+  adminDb: Firestore,
+  payslipId: string,
+  actor: Pick<UserDoc, "uid" | "displayName" | "email" | "employeeId" | "role" | "orgRole">,
+  metadata: { ip?: string | null; device?: string | null },
+) {
+  const payslipSnap = await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payslipId).get();
+  const payslip = hydrateEmployeePayslipRecord(payslipSnap);
+  if (!payslip) {
+    throw new PayrollServiceError("Payslip not found.", 404);
+  }
+
+  if (payslip.uid !== actor.uid && payslip.employeeId !== actor.employeeId) {
+    throw new PayrollServiceError("Forbidden", 403);
+  }
+
+  const actorInfo = buildActor(actor);
+  const event: EmployeePayslipDownloadEvent = {
+    downloadedAt: new Date().toISOString(),
+    downloadedBy: actorInfo,
+    ip: metadata.ip?.trim() || null,
+    device: metadata.device?.trim() || null,
+  };
+
+  const nextStatus: EmployeePayslipRecord["status"] = "downloaded";
+  await adminDb.collection(EMPLOYEE_PAYSLIPS).doc(payslip.id).set(
+    stripUndefinedDeep({
+      status: nextStatus,
+      viewedAt: payslip.viewedAt ? new Date(payslip.viewedAt) : new Date(),
+      downloadCount: payslip.downloadCount + 1,
+      downloadHistory: [...payslip.downloadHistory, event],
+      updatedAt: new Date(),
+    }),
+    { merge: true },
+  );
+
+  await recordPayrollDownload(
+    adminDb,
+    payslip.employeeId,
+    payslip.month,
+    actor,
+    "EMPLOYEE",
+    { payrollId: payslip.payrollRecordId },
+  );
+
+  return {
+    payslip: {
+      ...payslip,
+      status: nextStatus,
+      viewedAt: payslip.viewedAt ?? new Date().toISOString(),
+      downloadCount: payslip.downloadCount + 1,
+      downloadHistory: [...payslip.downloadHistory, event],
+    },
+  };
+}
+
 export async function resolvePayrollOwnership(
   adminDb: Firestore,
   employeeKey: string,
@@ -1478,4 +1857,19 @@ export async function resolvePayrollOwnership(
 ) {
   const employee = await resolveEmployeeByKey(adminDb, employeeKey);
   return employee.uid === requester.uid || employee.employeeId === requester.employeeId;
+}
+
+function matchesEmployeeIdentity(
+  record: Pick<EmployeePayslipRecord | PayrollRecord, "uid" | "employeeId">,
+  requester: Pick<UserDoc, "uid" | "employeeId">,
+) {
+  const requesterUid = requester.uid?.trim();
+  const requesterEmployeeId = requester.employeeId?.trim();
+  const recordUid = record.uid?.trim();
+  const recordEmployeeId = record.employeeId?.trim();
+
+  return Boolean(
+    (requesterUid && recordUid && requesterUid === recordUid) ||
+      (requesterEmployeeId && recordEmployeeId && requesterEmployeeId === recordEmployeeId),
+  );
 }

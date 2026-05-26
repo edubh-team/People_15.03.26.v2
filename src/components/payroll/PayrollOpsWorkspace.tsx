@@ -171,15 +171,29 @@ export default function PayrollOpsWorkspace() {
     try {
       setActionLoadingKey(buildActionKey(action, item.employee.uid));
       const token = await firebaseUser.getIdToken();
-      const response = await fetch(
-        `/api/payroll/${encodeURIComponent(item.employee.employeeId)}/${encodeURIComponent(selectedMonth)}/${action}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
+      const response =
+        action === "send"
+          ? await fetch("/api/payroll/send-payslip", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                employeeId: item.employee.employeeId,
+                month: selectedMonth,
+                payrollRecordId: item.payroll?.id ?? null,
+              }),
+            })
+          : await fetch(
+              `/api/payroll/${encodeURIComponent(item.employee.employeeId)}/${encodeURIComponent(selectedMonth)}/${action}`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              },
+            );
 
       const payload = (await response.json()) as PayrollDetailsResponse | { error?: string };
       if (!response.ok) {

@@ -74,6 +74,7 @@ const KNOWN_ROUTE_LABELS: Record<string, string> = {
   "/hr/payroll": "Payroll Ops",
   "/hr/recruitment": "Recruitment",
   "/payroll": "Payroll",
+  "/employee/payslips": "My Payslips",
   "/finance": "Finance",
   "/finance/accounts": "Accounts Directory",
   "/super-admin/mission-control": "Mission Control",
@@ -2002,6 +2003,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       onClick={() => setProfileOpen(false)}
                     >
                       Attendance History
+                    </Link>
+                    <Link
+                      href="/employee/payslips"
+                      className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      Payslips
                     </Link>
                     <Link
                       href={CANONICAL_DOMAIN_ROUTES.KNOWLEDGE_CENTER}

@@ -585,6 +585,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /employee_payslips/{payslipId} {
+      allow read: if request.auth != null && (
+        resource.data.uid == request.auth.uid ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR()
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isFinancer()
+      );
+      allow update, delete: if false;
+    }
+
     match /attendance/{attendanceId} {
        allow read: if request.auth != null;
        allow write: if request.auth != null && (request.auth.uid == resource.data.uid || request.auth.uid == resource.data.userId || isSuperAdmin() || isHR());

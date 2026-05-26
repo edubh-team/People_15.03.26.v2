@@ -167,6 +167,15 @@ export type PayrollDownloadEvent = {
   source: "HR" | "EMPLOYEE";
 };
 
+export type EmployeePayslipDeliveryStatus = "sent" | "downloaded";
+
+export type EmployeePayslipDownloadEvent = {
+  downloadedAt: string | null;
+  downloadedBy: PayrollActor | null;
+  ip: string | null;
+  device: string | null;
+};
+
 export type PayrollRecord = Payroll & {
   status: PayrollWorkflowStatus;
   employee: PayrollEmployeeRecord;
@@ -274,17 +283,42 @@ export type BulkGeneratePayrollResponse = {
 
 export type EmployeePayslipListItem = {
   id: string;
+  payrollRecordId: string;
+  employeeId: string;
+  uid: string;
   month: string;
-  status: PayrollWorkflowStatus;
-  netPay: number;
+  year: number;
+  monthName: string;
+  grossSalary: number;
+  deductions: number;
+  netSalary: number;
   pdfUrl: string | null;
-  version: number;
+  status: EmployeePayslipDeliveryStatus;
   sentAt: string | null;
-  downloadedAt: string | null;
+  sentBy: PayrollActor | null;
+  viewedAt: string | null;
   downloadCount: number;
+  downloadHistory: EmployeePayslipDownloadEvent[];
+  notificationId?: string | null;
   employee: PayrollEmployeeRecord;
 };
 
 export type EmployeePayslipListResponse = {
   items: EmployeePayslipListItem[];
+};
+
+export type EmployeePayslipRecord = EmployeePayslipListItem & {
+  createdAt: Date | null;
+  updatedAt: Date | null;
+};
+
+export type EmployeePayslipDetailsResponse = {
+  payslip: EmployeePayslipListItem;
+  payroll: PayrollRecord;
+};
+
+export type SendPayslipRequest = {
+  employeeId: string;
+  month: string;
+  payrollRecordId?: string | null;
 };

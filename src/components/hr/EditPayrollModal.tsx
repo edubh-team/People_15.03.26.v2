@@ -130,6 +130,7 @@ export default function EditPayrollModal({
   const [details, setDetails] = useState<PayrollDetailsResponse | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
 
@@ -141,12 +142,17 @@ export default function EditPayrollModal({
         if (active) {
           setDetails(null);
           setForm(null);
+          setLoadError(null);
+          setLoading(false);
         }
         return;
       }
 
       try {
         setLoading(true);
+        setLoadError(null);
+        setDetails(null);
+        setForm(null);
         const token = await firebaseUser.getIdToken();
         const searchParams = new URLSearchParams();
         if (item.payroll?.id) {
@@ -174,7 +180,11 @@ export default function EditPayrollModal({
         setForm(buildForm(payload as PayrollDetailsResponse));
       } catch (error: unknown) {
         if (!active) return;
-        onError(error instanceof Error ? error.message : "Unable to load payroll.");
+        const message = error instanceof Error ? error.message : "Unable to load payroll.";
+        setLoadError(message);
+        setDetails(null);
+        setForm(null);
+        onError(message);
       } finally {
         if (active) {
           setLoading(false);
@@ -364,8 +374,38 @@ export default function EditPayrollModal({
                   </button>
                 </div>
 
-                {loading || !form || !details ? (
+                {loading ? (
                   <div className="p-10 text-center text-sm text-slate-500">Loading payroll editor...</div>
+                ) : loadError ? (
+                  <div className="space-y-4 p-10 text-center">
+                    <div className="text-sm font-semibold text-rose-700">Unable to open payroll editor</div>
+                    <div className="text-sm text-slate-500">{loadError}</div>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                ) : !form || !details ? (
+                  <div className="space-y-4 p-10 text-center">
+                    <div className="text-sm font-semibold text-slate-700">Payroll editor is unavailable</div>
+                    <div className="text-sm text-slate-500">
+                      This payroll record could not be prepared for editing. Please refresh and try again.
+                    </div>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <div className="grid gap-6 p-6 xl:grid-cols-[1.25fr_1.25fr_0.75fr]">

@@ -162,6 +162,7 @@ async function resetGeneratedFixture(month) {
   const recordId = payrollRecordId(fixture.uid, month);
   const payrollRecordRef = db.collection("payroll_records").doc(recordId);
   const legacyPayrollRef = db.collection("payroll").doc(recordId);
+  const employeePayslipRef = db.collection("employee_payslips").doc(recordId);
   const payrollRecordSnap = await payrollRecordRef.get();
 
   assertCondition(payrollRecordSnap.exists, `Missing payroll_records/${recordId}`);
@@ -221,6 +222,7 @@ async function resetGeneratedFixture(month) {
   versionsSnap.docs.forEach((row) => batch.delete(row.ref));
   employeeNotificationsSnap.docs.forEach((row) => batch.delete(row.ref));
   notificationsSnap.docs.forEach((row) => batch.delete(row.ref));
+  batch.delete(employeePayslipRef);
 
   if (notificationId) {
     batch.delete(db.collection("employee_notifications").doc(notificationId));
@@ -336,6 +338,25 @@ async function runSmoke(month, host, options) {
     "Expected employee /api/payroll/me to include the sent payroll record.",
   );
 
+  const employeePayslips = await apiRequest({
+    host,
+    token: employeeToken,
+    path: "/api/employee/payslips",
+  });
+  assertCondition(
+    employeePayslips.status === 200,
+    `Expected employee /api/employee/payslips to return 200, received ${employeePayslips.status}.`,
+  );
+  assertCondition(
+    Array.isArray(employeePayslips.body?.items) &&
+      employeePayslips.body.items.some((row) => row.id === payrollRecordId(QA_FIXTURES.generated.uid, month)),
+    "Expected employee /api/employee/payslips to include the sent payslip.",
+  );
+
+  const employeePayslipId =
+    employeePayslips.body?.items?.find((row) => row.id === payrollRecordId(QA_FIXTURES.generated.uid, month))?.id ??
+    payrollRecordId(QA_FIXTURES.generated.uid, month);
+
   const employeeDetail = await apiRequest({
     host,
     token: employeeToken,
@@ -356,6 +377,27 @@ async function runSmoke(month, host, options) {
   assertCondition(employeePdf.status === 200, `Expected employee pdf to return 200, received ${employeePdf.status}.`);
   assertCondition(employeePdf.pdfBytes > 0, "Expected employee PDF to contain bytes.");
 
+  const employeePayslipDetail = await apiRequest({
+    host,
+    token: employeeToken,
+    path: `/api/employee/payslips/${employeePayslipId}`,
+  });
+  assertCondition(
+    employeePayslipDetail.status === 200,
+    `Expected employee payslip detail to return 200, received ${employeePayslipDetail.status}.`,
+  );
+
+  const employeePayslipPdf = await apiRequest({
+    host,
+    token: employeeToken,
+    path: `/api/employee/payslips/${employeePayslipId}/download`,
+  });
+  assertCondition(
+    employeePayslipPdf.status === 200,
+    `Expected employee payslip download to return 200, received ${employeePayslipPdf.status}.`,
+  );
+  assertCondition(employeePayslipPdf.pdfBytes > 0, "Expected employee payslip download PDF to contain bytes.");
+
   console.log(
     JSON.stringify(
       {
@@ -368,7 +410,9 @@ async function runSmoke(month, host, options) {
           approve: approve.body?.payroll?.status,
           send: send.body?.payroll?.status,
           employeeItems: employeeMe.body?.items?.length ?? 0,
+          employeePayslipItems: employeePayslips.body?.items?.length ?? 0,
           employeePdfBytes: employeePdf.pdfBytes,
+          employeePayslipPdfBytes: employeePayslipPdf.pdfBytes,
         },
       },
       null,

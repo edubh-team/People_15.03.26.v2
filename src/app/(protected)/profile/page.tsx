@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
-import EmployeePayslipsPanel from "@/components/payroll/EmployeePayslipsPanel";
 import { RoleBadge } from "@/components/RoleBadge";
 
 export default function ProfilePage() {
@@ -40,8 +40,37 @@ export default function ProfilePage() {
 
   return (
     <div>
-      <div className="text-xs font-medium text-slate-500">Account</div>
+      <div className="text-xs font-medium text-slate-500">My Account</div>
       <h1 className="mt-1 text-xl font-semibold tracking-tight">Profile</h1>
+
+      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <Link
+            href="/profile/me"
+            className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+          >
+            Profile
+          </Link>
+          <Link
+            href="/attendance"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Attendance
+          </Link>
+          <Link
+            href="/attendance"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Leave
+          </Link>
+          <Link
+            href="/employee/payslips"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Payslips
+          </Link>
+        </div>
+      </div>
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="text-sm font-semibold tracking-tight">Details</div>
@@ -107,8 +136,6 @@ export default function ProfilePage() {
           </div>
         </form>
       </div>
-
-      <EmployeePayslipsPanel uid={firebaseUser?.uid ?? null} />
     </div>
   );
 }

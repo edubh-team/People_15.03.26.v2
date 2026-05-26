@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { useAuth } from "@/components/auth/AuthProvider";
+import EmployeeLatestPayslipCard from "@/components/payroll/EmployeeLatestPayslipCard";
 import EmployeePayslipsPanel from "@/components/payroll/EmployeePayslipsPanel";
 import {
   calculateActiveMinutes,
@@ -283,6 +284,10 @@ export default function EmployeePage() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="mt-6">
+          <EmployeeLatestPayslipCard uid={uid} />
         </div>
 
         <EmployeePayslipsPanel uid={uid} title="Payslips" />
