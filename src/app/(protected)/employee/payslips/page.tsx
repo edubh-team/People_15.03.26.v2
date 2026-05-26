@@ -8,7 +8,7 @@ export default function EmployeePayslipsPage() {
   const { firebaseUser } = useAuth();
 
   return (
-    <AuthGate allowedRoles={["employee"]}>
+    <AuthGate>
       <div className="space-y-6">
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
