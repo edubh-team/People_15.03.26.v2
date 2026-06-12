@@ -376,6 +376,7 @@ export async function syncZohoMeetingConnectionFromCode(
   adminDb: Firestore,
   actor: UserDoc,
   code: string,
+  redirectUri?: string,
 ) {
   let token;
   let currentUser;
@@ -383,7 +384,7 @@ export async function syncZohoMeetingConnectionFromCode(
     if (process.env.NODE_ENV !== "production") {
       console.log("[DEBUG] syncZohoMeetingConnectionFromCode: exchanging code", { actor: actor.uid });
     }
-    token = await exchangeZohoAuthorizationCode(code);
+    token = await exchangeZohoAuthorizationCode(code, redirectUri);
     if (process.env.NODE_ENV !== "production") {
       console.log("[DEBUG] syncZohoMeetingConnectionFromCode: token received", {
         hasAccessToken: Boolean(token?.access_token),

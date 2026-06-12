@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 const STATE_COOKIE = "zoho_meeting_oauth_state";
 const RETURN_TO_COOKIE = "zoho_meeting_oauth_return_to";
+const REDIRECT_URI_COOKIE = "zoho_meeting_oauth_redirect_uri";
 const DEFAULT_RETURN_TO = "/crm/meetings/create";
 
 function buildRedirect(requestUrl: string, returnTo: string, status: "connected" | "error") {
@@ -20,6 +21,10 @@ function clearOauthCookies(response: NextResponse) {
     maxAge: 0,
   });
   response.cookies.set(RETURN_TO_COOKIE, "", {
+    path: "/",
+    maxAge: 0,
+  });
+  response.cookies.set(REDIRECT_URI_COOKIE, "", {
     path: "/",
     maxAge: 0,
   });
@@ -71,8 +76,17 @@ export async function GET(req: Request) {
     ?.split("=")
     .slice(1)
     .join("=") || DEFAULT_RETURN_TO;
+  const redirectUriCookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${REDIRECT_URI_COOKIE}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=") || "";
 
   const decodedReturnTo = decodeURIComponent(returnToCookie || DEFAULT_RETURN_TO);
+  const redirectUri = decodeURIComponent(redirectUriCookie || new URL("/api/zoho/callback", req.url).toString());
   if (process.env.NODE_ENV !== "production") {
     try {
       // eslint-disable-next-line no-console
@@ -81,6 +95,7 @@ export async function GET(req: Request) {
         state,
         stateCookie,
         returnToCookie: decodedReturnTo,
+        redirectUri,
       });
     } catch (e) {
       // ignore logging errors
@@ -97,6 +112,7 @@ export async function GET(req: Request) {
       verified.value.adminDb,
       verified.value.userDoc,
       code,
+      redirectUri,
     );
     const response = buildRedirect(req.url, decodedReturnTo, "connected");
     clearOauthCookies(response);

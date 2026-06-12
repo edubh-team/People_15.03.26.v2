@@ -145,10 +145,7 @@ export function getZohoMeetingEnv(): ZohoEnvConfig {
     "ZOHO_MEETING_CLIENT_SECRET or ZOHO_CLIENT_SECRET",
     readEnvAlias("ZOHO_MEETING_CLIENT_SECRET", "ZOHO_CLIENT_SECRET"),
   );
-  const redirectUri = ensureEnv(
-    "ZOHO_MEETING_REDIRECT_URI or ZOHO_REDIRECT_URI",
-    readEnvAlias("ZOHO_MEETING_REDIRECT_URI", "ZOHO_REDIRECT_URI"),
-  );
+  const redirectUri = readEnvAlias("ZOHO_MEETING_REDIRECT_URI", "ZOHO_REDIRECT_URI")?.trim() || "";
   const accountsBaseUrl = trimTrailingSlash(
     readEnvAlias("ZOHO_MEETING_ACCOUNTS_BASE_URL", "ZOHO_ACCOUNTS_BASE_URL")
       || DEFAULT_ACCOUNTS_BASE_URL,
@@ -300,20 +297,33 @@ function ensureZohoTokenResponse(payload: ZohoTokenResponse) {
 function buildZohoMeetingAuthorizationUrl(
   config: ZohoEnvConfig,
   state: string,
+  redirectUri?: string,
 ) {
   return buildUrl(`${config.accountsBaseUrl}/oauth/v2/auth`, "", {
     scope: config.scopes.join(","),
     client_id: config.clientId,
     response_type: "code",
-    redirect_uri: config.redirectUri,
+    redirect_uri: redirectUri || config.redirectUri,
     access_type: "offline",
     prompt: "consent",
     state,
   });
 }
 
-export function createZohoMeetingAuthorizationUrl(state: string) {
-  return buildZohoMeetingAuthorizationUrl(getZohoMeetingEnv(), state);
+function resolveZohoMeetingRedirectUri(redirectUri?: string) {
+  const normalized = redirectUri?.trim() || getZohoMeetingEnv().redirectUri;
+  return ensureEnv(
+    "ZOHO_MEETING_REDIRECT_URI or ZOHO_REDIRECT_URI",
+    normalized,
+  );
+}
+
+export function createZohoMeetingAuthorizationUrl(state: string, redirectUri?: string) {
+  return buildZohoMeetingAuthorizationUrl(
+    getZohoMeetingEnv(),
+    state,
+    resolveZohoMeetingRedirectUri(redirectUri),
+  );
 }
 
 async function exchangeZohoToken(
@@ -333,13 +343,13 @@ async function exchangeZohoToken(
   return ensureZohoTokenResponse(payload);
 }
 
-export async function exchangeZohoAuthorizationCode(code: string) {
+export async function exchangeZohoAuthorizationCode(code: string, redirectUri?: string) {
   const config = getZohoMeetingEnv();
   return exchangeZohoToken({
     code,
     client_id: config.clientId,
     client_secret: config.clientSecret,
-    redirect_uri: config.redirectUri,
+    redirect_uri: resolveZohoMeetingRedirectUri(redirectUri),
     grant_type: "authorization_code",
   });
 }
