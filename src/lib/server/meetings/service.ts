@@ -402,7 +402,6 @@ export async function syncZohoMeetingConnectionFromCode(
   } catch (err) {
     if (process.env.NODE_ENV !== "production") {
       try {
-        // eslint-disable-next-line no-console
         console.error("[DEBUG] syncZohoMeetingConnectionFromCode failed", {
           code,
           actor: actor.uid,

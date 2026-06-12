@@ -9,6 +9,28 @@ const RETURN_TO_COOKIE = "zoho_meeting_oauth_return_to";
 const REDIRECT_URI_COOKIE = "zoho_meeting_oauth_redirect_uri";
 const DEFAULT_RETURN_TO = "/crm/meetings/create";
 
+function resolveRequestOrigin(req: Request) {
+  const url = new URL(req.url);
+  const forwardedProto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || req.headers.get("host")?.trim();
+
+  if (forwardedProto && host) {
+    return `${forwardedProto}://${host}`;
+  }
+
+  const publicAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (publicAppUrl) {
+    try {
+      return new URL(publicAppUrl).origin;
+    } catch {
+      // ignore malformed public URL and fall back to request origin
+    }
+  }
+
+  return url.origin;
+}
+
 function buildRedirect(requestUrl: string, returnTo: string, status: "connected" | "error") {
   const target = new URL(returnTo, requestUrl);
   target.searchParams.set("zoho", status);
@@ -31,13 +53,12 @@ function clearOauthCookies(response: NextResponse) {
 }
 
 export async function GET(req: Request) {
-  const verified = await verifyBearerRequest(req);
   const requestUrl = new URL(req.url);
+  let verified: Awaited<ReturnType<typeof verifyBearerRequest>>;
   if (process.env.NODE_ENV !== "production") {
     try {
       // Temporary debug logging to help diagnose missing session cookie on OAuth redirect.
       // Logs will appear in the dev server console and should be removed after debugging.
-      // eslint-disable-next-line no-console
       console.log("[DEBUG] Zoho OAuth callback request:", {
         url: req.url,
         cookie: req.headers.get("cookie"),
@@ -50,6 +71,23 @@ export async function GET(req: Request) {
   const returnTo = requestUrl.searchParams.get("returnTo")?.trim()
     || requestUrl.searchParams.get("stateReturnTo")?.trim()
     || DEFAULT_RETURN_TO;
+
+  try {
+    verified = await verifyBearerRequest(req);
+  } catch (error) {
+    console.error("[ZOHO_CALLBACK_VERIFY_ERROR]", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      requestUrl: req.url,
+      returnTo,
+      forwardedProto: req.headers.get("x-forwarded-proto"),
+      forwardedHost: req.headers.get("x-forwarded-host"),
+      host: req.headers.get("host"),
+    });
+    const response = buildRedirect(req.url, returnTo, "error");
+    clearOauthCookies(response);
+    return response;
+  }
 
   if (!verified.ok) {
     const response = buildRedirect(req.url, returnTo, "error");
@@ -86,10 +124,11 @@ export async function GET(req: Request) {
     .join("=") || "";
 
   const decodedReturnTo = decodeURIComponent(returnToCookie || DEFAULT_RETURN_TO);
-  const redirectUri = decodeURIComponent(redirectUriCookie || new URL("/api/zoho/callback", req.url).toString());
+  const redirectUri = decodeURIComponent(
+    redirectUriCookie || new URL("/api/zoho/callback", resolveRequestOrigin(req)).toString(),
+  );
   if (process.env.NODE_ENV !== "production") {
     try {
-      // eslint-disable-next-line no-console
       console.log("[DEBUG] Zoho OAuth callback params:", {
         code,
         state,
@@ -120,7 +159,6 @@ export async function GET(req: Request) {
   } catch (err) {
     if (process.env.NODE_ENV !== "production") {
       try {
-        // eslint-disable-next-line no-console
         console.error("[DEBUG] Zoho OAuth sync failed", {
           code,
           state,
