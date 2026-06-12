@@ -61,6 +61,10 @@ const KNOWN_ROUTE_LABELS: Record<string, string> = {
   "/my-day": "My Day",
   "/knowledge-center": "Knowledge Center",
   "/crm/leads": "CRM Leads",
+  "/crm/meetings": "Upcoming Meetings",
+  "/crm/meetings/create": "Create Meeting",
+  "/crm/meetings/history": "Meeting History",
+  "/crm/meetings/recordings": "Recordings",
   "/team": "Team Management",
   "/tasks": "Tasks",
   "/reports": "Reports",
@@ -667,6 +671,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         keywords: ["crm", "leads", "call", "follow-up"],
       },
       {
+        href: CANONICAL_DOMAIN_ROUTES.MEETINGS,
+        label: "Upcoming Meetings",
+        description: "Scheduled sessions, join links, attendance context",
+        keywords: ["meetings", "calendar", "join", "zoho", "upcoming"],
+      },
+      {
+        href: CANONICAL_DOMAIN_ROUTES.MEETING_CREATE,
+        label: "Create Meeting",
+        description: "Schedule team sessions from CRM",
+        keywords: ["meetings", "schedule", "create", "zoho"],
+      },
+      {
+        href: CANONICAL_DOMAIN_ROUTES.MEETING_HISTORY,
+        label: "Meeting History",
+        description: "Past sessions, attendance, no-shows",
+        keywords: ["meetings", "history", "attendance", "missed"],
+      },
+      {
+        href: CANONICAL_DOMAIN_ROUTES.MEETING_RECORDINGS,
+        label: "Recordings",
+        description: "Meeting recordings, transcripts, summaries",
+        keywords: ["meetings", "recordings", "transcript", "summary"],
+      },
+      {
         href: CANONICAL_DOMAIN_ROUTES.REPORTS,
         label: "Reports",
         description: "KPI reports, templates, exports",
@@ -826,7 +854,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const stickyContextActions = useMemo(() => {
     const actions = [] as StickyContextAction[];
-    if (pathname.startsWith(CANONICAL_DOMAIN_ROUTES.CRM)) {
+    if (pathname.startsWith(CANONICAL_DOMAIN_ROUTES.MEETINGS)) {
+      actions.push(
+        { id: "meet-upcoming", label: "Upcoming", href: CANONICAL_DOMAIN_ROUTES.MEETINGS },
+        { id: "meet-create", label: "Create", href: CANONICAL_DOMAIN_ROUTES.MEETING_CREATE },
+        { id: "meet-history", label: "History", href: CANONICAL_DOMAIN_ROUTES.MEETING_HISTORY },
+        { id: "meet-recordings", label: "Recordings", href: CANONICAL_DOMAIN_ROUTES.MEETING_RECORDINGS },
+      );
+    } else if (pathname.startsWith(CANONICAL_DOMAIN_ROUTES.CRM)) {
       actions.push(
         { id: "assign", label: "Assign Queue", href: "/team" },
         { id: "followup", label: "Due Today", href: `${CANONICAL_DOMAIN_ROUTES.CRM}?surface=workbench&tab=due_today` },

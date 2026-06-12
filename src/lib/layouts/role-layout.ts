@@ -21,6 +21,7 @@ export type AppNavIconName =
   | "dashboard"
   | "attendance"
   | "tasks"
+  | "meetings"
   | "leads"
   | "reports"
   | "admin"
@@ -134,6 +135,27 @@ const SALES_LEADERSHIP_GROUP: ShellNavGroup = {
   children: [
     { label: "Leads", href: CANONICAL_DOMAIN_ROUTES.CRM, icon: "leads" },
     { label: "Reports", href: CANONICAL_DOMAIN_ROUTES.REPORTS, icon: "reports" },
+  ],
+};
+
+const MEETINGS_MANAGE_GROUP: ShellNavGroup = {
+  key: "MEETINGS",
+  label: "MEETINGS",
+  children: [
+    { label: "Create Meeting", href: CANONICAL_DOMAIN_ROUTES.MEETING_CREATE, icon: "meetings" },
+    { label: "Upcoming Meetings", href: CANONICAL_DOMAIN_ROUTES.MEETINGS, icon: "meetings" },
+    { label: "Meeting History", href: CANONICAL_DOMAIN_ROUTES.MEETING_HISTORY, icon: "meetings" },
+    { label: "Recordings", href: CANONICAL_DOMAIN_ROUTES.MEETING_RECORDINGS, icon: "meetings" },
+  ],
+};
+
+const MEETINGS_VIEW_GROUP: ShellNavGroup = {
+  key: "MEETINGS",
+  label: "MEETINGS",
+  children: [
+    { label: "Upcoming Meetings", href: CANONICAL_DOMAIN_ROUTES.MEETINGS, icon: "meetings" },
+    { label: "Meeting History", href: CANONICAL_DOMAIN_ROUTES.MEETING_HISTORY, icon: "meetings" },
+    { label: "Recordings", href: CANONICAL_DOMAIN_ROUTES.MEETING_RECORDINGS, icon: "meetings" },
   ],
 };
 
@@ -320,6 +342,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
           FINANCE_GROUP,
           HR_GROUP,
           ADMIN_GROUP,
+          MEETINGS_MANAGE_GROUP,
           SALES_LEADERSHIP_GROUP,
           WORKDAY_GROUP,
           PERSONAL_GROUP,
@@ -339,7 +362,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: true,
-        shellGroups: [ADMIN_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [ADMIN_GROUP, MEETINGS_MANAGE_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -355,7 +378,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["HR"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [HR_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [HR_GROUP, MEETINGS_MANAGE_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_AGENT_SECTIONS,
@@ -371,7 +394,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [FINANCE_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [FINANCE_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_AGENT_SECTIONS,
@@ -387,7 +410,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [MANAGER_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [MANAGER_GROUP, MEETINGS_MANAGE_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -403,7 +426,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: true,
         showSetup: false,
-        shellGroups: [TEAM_LEAD_MANAGEMENT_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [TEAM_LEAD_MANAGEMENT_GROUP, MEETINGS_MANAGE_GROUP, SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -419,7 +442,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [SALES_BDA_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [SALES_BDA_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "status",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -435,7 +458,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [CHANNEL_PARTNER_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [CHANNEL_PARTNER_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "status",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -451,7 +474,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [TRAINING_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [TRAINING_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "status",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -467,7 +490,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [TRAINING_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [TRAINING_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "summary",
           visibleSections: CRM_ADMIN_SECTIONS,
@@ -484,7 +507,7 @@ export function getRoleLayoutProfile(user: RoleSource): RoleLayoutProfile {
         availableWorkspaces: ["CRM"],
         showTeamModeToggle: false,
         showSetup: false,
-        shellGroups: [SALES_BDA_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
+        shellGroups: [SALES_BDA_GROUP, MEETINGS_VIEW_GROUP, WORKDAY_GROUP, PERSONAL_GROUP],
         crm: {
           defaultSection: "status",
           visibleSections: CRM_AGENT_SECTIONS,
@@ -507,8 +530,8 @@ export function getShellNavigationGroups(
   if (profile.key === "TEAM_LEAD") {
     const isTeamMode = options.pathname?.startsWith("/team");
     return isTeamMode
-      ? [TEAM_LEAD_MANAGEMENT_GROUP, WORKDAY_GROUP, PERSONAL_GROUP]
-      : [SALES_LEADERSHIP_GROUP, WORKDAY_GROUP, PERSONAL_GROUP];
+      ? [TEAM_LEAD_MANAGEMENT_GROUP, MEETINGS_MANAGE_GROUP, WORKDAY_GROUP, PERSONAL_GROUP]
+      : [SALES_LEADERSHIP_GROUP, MEETINGS_MANAGE_GROUP, WORKDAY_GROUP, PERSONAL_GROUP];
   }
 
   const resolvedGroups =
@@ -517,8 +540,8 @@ export function getShellNavigationGroups(
       : (() => {
           const priority =
             options.workspace === "HR"
-              ? ["SUPER", "HR", "FINANCE", "MANAGEMENT", "SALES", "WORKDAY", "PERSONAL"]
-              : ["SUPER", "FINANCE", "MANAGEMENT", "SALES", "WORKDAY", "PERSONAL", "HR"];
+              ? ["SUPER", "HR", "FINANCE", "MANAGEMENT", "MEETINGS", "SALES", "WORKDAY", "PERSONAL"]
+              : ["SUPER", "FINANCE", "MANAGEMENT", "MEETINGS", "SALES", "WORKDAY", "PERSONAL", "HR"];
           const ranking = new Map(priority.map((key, index) => [key, index]));
 
           return [...profile.shellGroups].sort(

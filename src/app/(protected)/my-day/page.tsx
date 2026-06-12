@@ -13,6 +13,7 @@ import { AuthGate } from "@/components/auth/AuthGate";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { createCounsellingEntry } from "@/app/actions/hr";
 import RoleDashboardsPanel from "@/components/my-day/RoleDashboardsPanel";
+import { MeetingsDashboardWidgets } from "@/components/meetings/MeetingsDashboardWidgets";
 import DirectSaleForm from "@/components/leads/DirectSaleForm";
 import { CANONICAL_DOMAIN_ROUTES } from "@/lib/routes/canonical";
 import {
@@ -1090,6 +1091,8 @@ export default function MyDayPage() {
             salesLeads={salesQueues.leads}
             salesQueues={salesQueues.counts}
           />
+
+          <MeetingsDashboardWidgets compact />
 
           {isBdaUser ? (
             <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">

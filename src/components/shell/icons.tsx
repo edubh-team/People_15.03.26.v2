@@ -9,6 +9,7 @@ export function NavIcon({
     | "dashboard"
     | "attendance"
     | "tasks"
+    | "meetings"
     | "leads"
     | "reports"
     | "admin"
@@ -91,6 +92,17 @@ export function NavIcon({
       <svg {...common} stroke="currentColor" strokeWidth="1.8">
         <path d="M9 6h12M9 12h12M9 18h12" />
         <path d="M4 6h.01M4 12h.01M4 18h.01" />
+      </svg>
+    );
+  }
+
+  if (name === "meetings") {
+    return (
+      <svg {...common} stroke="currentColor" strokeWidth="1.8">
+        <path d="M7 3v3M17 3v3" />
+        <path d="M4 8h16" />
+        <rect x="4" y="5" width="16" height="15" rx="2" />
+        <path d="M8 13h4M8 16h8M16 12l2 2 3-3" />
       </svg>
     );
   }

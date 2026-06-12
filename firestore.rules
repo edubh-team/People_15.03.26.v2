@@ -1038,6 +1038,46 @@ service cloud.firestore {
       );
     }
 
+    match /meetings/{meetingId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove() ||
+        isTeamLead()
+      );
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR()
+      );
+    }
+
+    match /participants/{participantId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove() ||
+        isTeamLead()
+      );
+      allow delete: if false;
+    }
+
+    match /recordings/{recordingId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isHR() ||
+        isManagerOrAbove() ||
+        isTeamLead()
+      );
+      allow delete: if false;
+    }
+
     // Finance Collections
     match /finance_external_accounts/{docId} {
       allow read: if request.auth != null;

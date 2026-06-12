@@ -1,6 +1,10 @@
 export const CANONICAL_DOMAIN_ROUTES = {
   MY_DAY: "/my-day",
   CRM: "/crm/leads",
+  MEETINGS: "/crm/meetings",
+  MEETING_CREATE: "/crm/meetings/create",
+  MEETING_HISTORY: "/crm/meetings/history",
+  MEETING_RECORDINGS: "/crm/meetings/recordings",
   TEAM: "/team",
   HR: "/hr",
   PAYROLL: "/payroll",
