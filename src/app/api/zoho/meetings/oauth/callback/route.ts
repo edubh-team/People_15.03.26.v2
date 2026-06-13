@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Firestore } from "firebase-admin/firestore";
 import { getAdmin } from "@/lib/firebase/admin";
+import { readSignedZohoOauthState } from "@/lib/server/meetings/zoho";
 import { syncZohoMeetingConnectionFromCode } from "@/lib/server/meetings/service";
 import { verifyBearerRequest } from "@/lib/server/request-auth";
 import type { UserDoc } from "@/lib/types/user";
@@ -112,6 +113,41 @@ export async function GET(req: Request) {
     ?.split("=")
     .slice(1)
     .join("=") || "";
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code")?.trim() || "";
+  const state = url.searchParams.get("state")?.trim() || "";
+  const statePayload = readSignedZohoOauthState(state);
+  const stateCookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${STATE_COOKIE}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=") || "";
+  const returnToCookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${RETURN_TO_COOKIE}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=") || DEFAULT_RETURN_TO;
+  const redirectUriCookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${REDIRECT_URI_COOKIE}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=") || "";
+  const decodedReturnTo = statePayload?.returnTo
+    || decodeURIComponent(returnToCookie || DEFAULT_RETURN_TO);
+  const redirectUri = decodeURIComponent(
+    statePayload?.redirectUri
+      || redirectUriCookie
+      || new URL("/api/zoho/callback", resolveRequestOrigin(req)).toString(),
+  );
 
   try {
     verified = await verifyBearerRequest(req);
@@ -137,7 +173,9 @@ export async function GET(req: Request) {
       userDoc: verified.value.userDoc,
     };
   } else {
-    actorContext = await readCallbackActorFromCookie(decodeURIComponent(actorUidCookie || ""));
+    actorContext = await readCallbackActorFromCookie(
+      statePayload?.actorUid || decodeURIComponent(actorUidCookie || ""),
+    );
   }
 
   if (!actorContext) {
@@ -146,44 +184,13 @@ export async function GET(req: Request) {
     return response;
   }
 
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code")?.trim() || "";
-  const state = url.searchParams.get("state")?.trim() || "";
-  const stateCookie = req.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${STATE_COOKIE}=`))
-    ?.split("=")
-    .slice(1)
-    .join("=") || "";
-  const returnToCookie = req.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${RETURN_TO_COOKIE}=`))
-    ?.split("=")
-    .slice(1)
-    .join("=") || DEFAULT_RETURN_TO;
-  const redirectUriCookie = req.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${REDIRECT_URI_COOKIE}=`))
-    ?.split("=")
-    .slice(1)
-    .join("=") || "";
-
-  const decodedReturnTo = decodeURIComponent(returnToCookie || DEFAULT_RETURN_TO);
-  const redirectUri = decodeURIComponent(
-    redirectUriCookie || new URL("/api/zoho/callback", resolveRequestOrigin(req)).toString(),
-  );
   if (process.env.NODE_ENV !== "production") {
     try {
       console.log("[DEBUG] Zoho OAuth callback params:", {
         code,
         state,
         stateCookie,
+        statePayload,
         returnToCookie: decodedReturnTo,
         redirectUri,
       });
@@ -191,7 +198,9 @@ export async function GET(req: Request) {
       // ignore logging errors
     }
   }
-  if (!code || !state || !stateCookie || state !== decodeURIComponent(stateCookie)) {
+  const cookieStateMatches = Boolean(stateCookie) && state === decodeURIComponent(stateCookie);
+  const signedStateValid = Boolean(statePayload);
+  if (!code || !state || (!signedStateValid && !cookieStateMatches)) {
     const response = buildRedirect(origin, decodedReturnTo, "error");
     clearOauthCookies(response);
     return response;
@@ -208,20 +217,18 @@ export async function GET(req: Request) {
     clearOauthCookies(response);
     return response;
   } catch (err) {
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        console.error("[DEBUG] Zoho OAuth sync failed", {
-          code,
-          state,
-          error: err instanceof Error ? err.message : String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-          // attempt to capture payload if present
-          payload: (err as any)?.payload ?? null,
-        });
-      } catch (e) {
-        // ignore
-      }
-    }
+    console.error("[ZOHO_CALLBACK_SYNC_ERROR]", {
+      actorUid: actorContext.userDoc.uid,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      payload: (err as any)?.payload ?? null,
+      hasCode: Boolean(code),
+      signedStateValid,
+      cookieStateMatches,
+      redirectUri,
+      returnTo: decodedReturnTo,
+      requestUrl: req.url,
+    });
     const response = buildRedirect(origin, decodedReturnTo, "error");
     clearOauthCookies(response);
     return response;

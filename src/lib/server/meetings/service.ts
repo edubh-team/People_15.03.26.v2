@@ -400,19 +400,13 @@ export async function syncZohoMeetingConnectionFromCode(
       });
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        console.error("[DEBUG] syncZohoMeetingConnectionFromCode failed", {
-          code,
-          actor: actor.uid,
-          error: err instanceof Error ? err.message : String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-          payload: (err as any)?.payload ?? null,
-        });
-      } catch (e) {
-        // ignore
-      }
-    }
+    console.error("[ZOHO_CONNECTION_EXCHANGE_ERROR]", {
+      actorUid: actor.uid,
+      redirectUri: redirectUri ?? null,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      payload: (err as any)?.payload ?? null,
+    });
     throw err;
   }
 

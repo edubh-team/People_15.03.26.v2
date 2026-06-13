@@ -1,6 +1,9 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { createZohoMeetingAuthorizationUrl } from "@/lib/server/meetings/zoho";
+import {
+  createSignedZohoOauthState,
+  createZohoMeetingAuthorizationUrl,
+} from "@/lib/server/meetings/zoho";
 
 export const runtime = "nodejs";
 
@@ -91,8 +94,13 @@ async function buildOauthStart(req: Request, returnToOverride?: string) {
     || req.headers.get("x-zoho-actor-uid")?.trim()
     || "";
 
-  const state = randomUUID();
   const redirectUri = new URL("/api/zoho/callback", origin).toString();
+  const state = createSignedZohoOauthState({
+    actorUid,
+    nonce: randomUUID(),
+    redirectUri,
+    returnTo,
+  });
   const authorizationUrl = createZohoMeetingAuthorizationUrl(state, redirectUri);
 
   return {

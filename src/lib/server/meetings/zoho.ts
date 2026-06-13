@@ -1,4 +1,5 @@
 import "server-only";
+import { createHmac, timingSafeEqual } from "crypto";
 
 import type {
   CreateMeetingInput,
@@ -89,6 +90,15 @@ const DEFAULT_SCOPES = [
   "ZohoMeeting.meeting.DELETE",
   "ZohoMeeting.recording.READ",
 ];
+const ZOHO_OAUTH_STATE_MAX_AGE_MS = 1000 * 60 * 15;
+
+export type ZohoOauthStatePayload = {
+  actorUid: string;
+  nonce: string;
+  redirectUri: string;
+  returnTo: string;
+  issuedAtMs: number;
+};
 
 export class ZohoMeetingError extends Error {
   status: number;
@@ -104,6 +114,25 @@ export class ZohoMeetingError extends Error {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function toBase64Url(input: string) {
+  return Buffer.from(input, "utf8").toString("base64url");
+}
+
+function fromBase64Url(input: string) {
+  return Buffer.from(input, "base64url").toString("utf8");
+}
+
+function signZohoOauthState(body: string, secret: string) {
+  return createHmac("sha256", secret).update(body).digest("base64url");
+}
+
+function safeCompare(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function ensureEnv(name: string, value: string | undefined | null) {
@@ -178,6 +207,57 @@ export function getZohoMeetingEnv(): ZohoEnvConfig {
     sourceLabel,
     scopes,
   };
+}
+
+export function createSignedZohoOauthState(input: Omit<ZohoOauthStatePayload, "issuedAtMs">) {
+  const config = getZohoMeetingEnv();
+  const payload: ZohoOauthStatePayload = {
+    ...input,
+    issuedAtMs: Date.now(),
+  };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const signature = signZohoOauthState(encodedPayload, config.clientSecret);
+  return `${encodedPayload}.${signature}`;
+}
+
+export function readSignedZohoOauthState(state: string): ZohoOauthStatePayload | null {
+  const normalized = state.trim();
+  if (!normalized) return null;
+
+  const [encodedPayload, signature] = normalized.split(".");
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = signZohoOauthState(encodedPayload, getZohoMeetingEnv().clientSecret);
+  if (!safeCompare(signature, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(fromBase64Url(encodedPayload)) as Partial<ZohoOauthStatePayload>;
+    if (
+      !payload
+      || typeof payload.actorUid !== "string"
+      || typeof payload.nonce !== "string"
+      || typeof payload.redirectUri !== "string"
+      || typeof payload.returnTo !== "string"
+      || typeof payload.issuedAtMs !== "number"
+    ) {
+      return null;
+    }
+    if (Date.now() - payload.issuedAtMs > ZOHO_OAUTH_STATE_MAX_AGE_MS) {
+      return null;
+    }
+
+    return {
+      actorUid: payload.actorUid,
+      nonce: payload.nonce,
+      redirectUri: payload.redirectUri,
+      returnTo: payload.returnTo,
+      issuedAtMs: payload.issuedAtMs,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function readExpiresInMs(payload: ZohoTokenResponse) {
