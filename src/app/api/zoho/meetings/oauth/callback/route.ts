@@ -31,8 +31,8 @@ function resolveRequestOrigin(req: Request) {
   return url.origin;
 }
 
-function buildRedirect(requestUrl: string, returnTo: string, status: "connected" | "error") {
-  const target = new URL(returnTo, requestUrl);
+function buildRedirect(origin: string, returnTo: string, status: "connected" | "error") {
+  const target = new URL(returnTo, origin);
   target.searchParams.set("zoho", status);
   return NextResponse.redirect(target);
 }
@@ -54,6 +54,7 @@ function clearOauthCookies(response: NextResponse) {
 
 export async function GET(req: Request) {
   const requestUrl = new URL(req.url);
+  const origin = resolveRequestOrigin(req);
   let verified: Awaited<ReturnType<typeof verifyBearerRequest>>;
   if (process.env.NODE_ENV !== "production") {
     try {
@@ -80,17 +81,18 @@ export async function GET(req: Request) {
       stack: error instanceof Error ? error.stack : undefined,
       requestUrl: req.url,
       returnTo,
+      resolvedOrigin: origin,
       forwardedProto: req.headers.get("x-forwarded-proto"),
       forwardedHost: req.headers.get("x-forwarded-host"),
       host: req.headers.get("host"),
     });
-    const response = buildRedirect(req.url, returnTo, "error");
+    const response = buildRedirect(origin, returnTo, "error");
     clearOauthCookies(response);
     return response;
   }
 
   if (!verified.ok) {
-    const response = buildRedirect(req.url, returnTo, "error");
+    const response = buildRedirect(origin, returnTo, "error");
     clearOauthCookies(response);
     return response;
   }
@@ -141,7 +143,7 @@ export async function GET(req: Request) {
     }
   }
   if (!code || !state || !stateCookie || state !== decodeURIComponent(stateCookie)) {
-    const response = buildRedirect(req.url, decodedReturnTo, "error");
+    const response = buildRedirect(origin, decodedReturnTo, "error");
     clearOauthCookies(response);
     return response;
   }
@@ -153,7 +155,7 @@ export async function GET(req: Request) {
       code,
       redirectUri,
     );
-    const response = buildRedirect(req.url, decodedReturnTo, "connected");
+    const response = buildRedirect(origin, decodedReturnTo, "connected");
     clearOauthCookies(response);
     return response;
   } catch (err) {
@@ -171,7 +173,7 @@ export async function GET(req: Request) {
         // ignore
       }
     }
-    const response = buildRedirect(req.url, decodedReturnTo, "error");
+    const response = buildRedirect(origin, decodedReturnTo, "error");
     clearOauthCookies(response);
     return response;
   }

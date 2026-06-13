@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { verifyBearerRequest } from "@/lib/server/request-auth";
 import { createZohoMeetingAuthorizationUrl } from "@/lib/server/meetings/zoho";
 
 export const runtime = "nodejs";
@@ -10,8 +9,8 @@ const RETURN_TO_COOKIE = "zoho_meeting_oauth_return_to";
 const REDIRECT_URI_COOKIE = "zoho_meeting_oauth_redirect_uri";
 const DEFAULT_RETURN_TO = "/crm/meetings/create";
 
-function buildReturnRedirect(requestUrl: string, returnTo: string) {
-  const target = new URL(returnTo || DEFAULT_RETURN_TO, requestUrl);
+function buildReturnRedirect(origin: string, returnTo: string) {
+  const target = new URL(returnTo || DEFAULT_RETURN_TO, origin);
   target.searchParams.set("zoho", "error");
   return NextResponse.redirect(target);
 }
@@ -41,15 +40,11 @@ function resolveRequestOrigin(req: Request) {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const returnTo = url.searchParams.get("returnTo")?.trim() || DEFAULT_RETURN_TO;
+  const origin = resolveRequestOrigin(req);
 
   try {
-    const verified = await verifyBearerRequest(req);
-    if (!verified.ok) {
-      return buildReturnRedirect(req.url, returnTo);
-    }
-
     const state = randomUUID();
-    const redirectUri = new URL("/api/zoho/callback", resolveRequestOrigin(req)).toString();
+    const redirectUri = new URL("/api/zoho/callback", origin).toString();
 
     const response = NextResponse.redirect(createZohoMeetingAuthorizationUrl(state, redirectUri));
     response.cookies.set(STATE_COOKIE, state, {
@@ -80,10 +75,11 @@ export async function GET(req: Request) {
       stack: error instanceof Error ? error.stack : undefined,
       requestUrl: req.url,
       returnTo,
+      resolvedOrigin: origin,
       forwardedProto: req.headers.get("x-forwarded-proto"),
       forwardedHost: req.headers.get("x-forwarded-host"),
       host: req.headers.get("host"),
     });
-    return buildReturnRedirect(req.url, returnTo);
+    return buildReturnRedirect(origin, returnTo);
   }
 }
