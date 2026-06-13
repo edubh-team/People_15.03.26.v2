@@ -57,6 +57,10 @@ ZOHO_ACCOUNTS_BASE_URL="${ZOHO_ACCOUNTS_BASE_URL:-${ZOHO_MEETING_ACCOUNTS_BASE_U
 ZOHO_API_BASE_URL="${ZOHO_API_BASE_URL:-${ZOHO_MEETING_API_BASE_URL:-}}"
 ZOHO_RECORDING_API_BASE_URL="${ZOHO_RECORDING_API_BASE_URL:-${ZOHO_MEETING_RECORDING_API_BASE_URL:-}}"
 
+: "${ZOHO_MEETING_CLIENT_ID:?Missing Zoho client ID. Set ZOHO_MEETING_CLIENT_ID or ZOHO_CLIENT_ID in .env.local.}"
+: "${ZOHO_MEETING_CLIENT_SECRET:?Missing Zoho client secret. Set ZOHO_MEETING_CLIENT_SECRET or ZOHO_CLIENT_SECRET in .env.local.}"
+: "${ZOHO_MEETING_REDIRECT_URI:?Missing Zoho redirect URI. Set ZOHO_MEETING_REDIRECT_URI or ZOHO_REDIRECT_URI in .env.local.}"
+
 if docker image inspect people-hrms:latest >/dev/null 2>&1; then
     echo "Tagging current image as rollback candidate..."
     docker tag people-hrms:latest people-hrms:previous || true
