@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
+import type { Firestore } from "firebase-admin/firestore";
+import { getAdmin } from "@/lib/firebase/admin";
 import { syncZohoMeetingConnectionFromCode } from "@/lib/server/meetings/service";
 import { verifyBearerRequest } from "@/lib/server/request-auth";
+import type { UserDoc } from "@/lib/types/user";
 
 export const runtime = "nodejs";
 
 const STATE_COOKIE = "zoho_meeting_oauth_state";
 const RETURN_TO_COOKIE = "zoho_meeting_oauth_return_to";
 const REDIRECT_URI_COOKIE = "zoho_meeting_oauth_redirect_uri";
+const ACTOR_UID_COOKIE = "zoho_meeting_oauth_actor_uid";
 const DEFAULT_RETURN_TO = "/crm/meetings/create";
+
+type CallbackActorContext = {
+  adminDb: Firestore;
+  userDoc: UserDoc;
+};
 
 function resolveRequestOrigin(req: Request) {
   const url = new URL(req.url);
@@ -50,12 +59,35 @@ function clearOauthCookies(response: NextResponse) {
     path: "/",
     maxAge: 0,
   });
+  response.cookies.set(ACTOR_UID_COOKIE, "", {
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+async function readCallbackActorFromCookie(actorUid: string) {
+  const normalizedUid = actorUid.trim();
+  if (!normalizedUid) return null;
+
+  const { adminDb } = await getAdmin();
+  const userSnap = await adminDb.collection("users").doc(normalizedUid).get();
+  if (!userSnap.exists) {
+    return null;
+  }
+
+  return {
+    adminDb,
+    userDoc: {
+      ...(userSnap.data() as UserDoc),
+      uid: userSnap.id,
+    },
+  };
 }
 
 export async function GET(req: Request) {
   const requestUrl = new URL(req.url);
   const origin = resolveRequestOrigin(req);
-  let verified: Awaited<ReturnType<typeof verifyBearerRequest>>;
+  let verified: Awaited<ReturnType<typeof verifyBearerRequest>> | null = null;
   if (process.env.NODE_ENV !== "production") {
     try {
       // Temporary debug logging to help diagnose missing session cookie on OAuth redirect.
@@ -72,6 +104,14 @@ export async function GET(req: Request) {
   const returnTo = requestUrl.searchParams.get("returnTo")?.trim()
     || requestUrl.searchParams.get("stateReturnTo")?.trim()
     || DEFAULT_RETURN_TO;
+  const actorUidCookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${ACTOR_UID_COOKIE}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=") || "";
 
   try {
     verified = await verifyBearerRequest(req);
@@ -86,12 +126,21 @@ export async function GET(req: Request) {
       forwardedHost: req.headers.get("x-forwarded-host"),
       host: req.headers.get("host"),
     });
-    const response = buildRedirect(origin, returnTo, "error");
-    clearOauthCookies(response);
-    return response;
+    verified = null;
   }
 
-  if (!verified.ok) {
+  let actorContext: CallbackActorContext | null = null;
+
+  if (verified?.ok) {
+    actorContext = {
+      adminDb: verified.value.adminDb,
+      userDoc: verified.value.userDoc,
+    };
+  } else {
+    actorContext = await readCallbackActorFromCookie(decodeURIComponent(actorUidCookie || ""));
+  }
+
+  if (!actorContext) {
     const response = buildRedirect(origin, returnTo, "error");
     clearOauthCookies(response);
     return response;
@@ -150,8 +199,8 @@ export async function GET(req: Request) {
 
   try {
     await syncZohoMeetingConnectionFromCode(
-      verified.value.adminDb,
-      verified.value.userDoc,
+      actorContext.adminDb,
+      actorContext.userDoc,
       code,
       redirectUri,
     );

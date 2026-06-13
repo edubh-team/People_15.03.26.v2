@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type {
   CreateMeetingInput,
   MeetingAudienceMode,
@@ -67,6 +68,7 @@ function parseAdditionalInviteEmails(value: string) {
 }
 
 export function CreateMeetingClient() {
+  const { firebaseUser } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const meetingId = searchParams.get("meetingId");
@@ -236,6 +238,38 @@ export function CreateMeetingClient() {
     };
   }
 
+  function buildZohoReturnTo() {
+    return meetingId
+      ? `/crm/meetings/create?meetingId=${meetingId}`
+      : "/crm/meetings/create";
+  }
+
+  async function startZohoOauth() {
+    if (!firebaseUser) {
+      throw new Error("Your session is not ready yet. Refresh the page and try again.");
+    }
+
+    const token = await firebaseUser.getIdToken();
+    const response = await fetch("/api/zoho/authorize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        returnTo: buildZohoReturnTo(),
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; url?: string }
+      | null;
+    if (!response.ok || !payload?.url) {
+      throw new Error(payload?.error || "Unable to start Zoho Meeting connection.");
+    }
+
+    window.location.href = payload.url;
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
@@ -284,13 +318,11 @@ export function CreateMeetingClient() {
       }
 
       if (mode === "switch") {
-        window.location.href = `/api/zoho/authorize?returnTo=${encodeURIComponent(meetingId ? `/crm/meetings/create?meetingId=${meetingId}` : "/crm/meetings/create")}`;
+        await startZohoOauth();
         return;
       }
 
-      window.location.href = meetingId
-        ? `/crm/meetings/create?meetingId=${encodeURIComponent(meetingId)}`
-        : "/crm/meetings/create";
+      window.location.href = buildZohoReturnTo();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to update Zoho Meeting login.");
     } finally {
@@ -389,12 +421,28 @@ export function CreateMeetingClient() {
                   The Meetings module is ready, but this account needs a Zoho OAuth connection before it can create or sync meetings.
                 </p>
               </div>
-              <a
-                href={`/api/zoho/authorize?returnTo=${encodeURIComponent(meetingId ? `/crm/meetings/create?meetingId=${meetingId}` : "/crm/meetings/create")}`}
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setAccountActionLoading("switch");
+                  void startZohoOauth()
+                    .catch((nextError) => {
+                      setError(
+                        nextError instanceof Error
+                          ? nextError.message
+                          : "Unable to start Zoho Meeting connection.",
+                      );
+                    })
+                    .finally(() => {
+                      setAccountActionLoading(null);
+                    });
+                }}
+                disabled={Boolean(accountActionLoading)}
                 className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
               >
-                Connect Zoho
-              </a>
+                {accountActionLoading === "switch" ? "Connecting..." : "Connect Zoho"}
+              </button>
             </div>
           </div>
         ) : null}
