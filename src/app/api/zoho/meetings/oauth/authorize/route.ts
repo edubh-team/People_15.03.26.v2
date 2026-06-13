@@ -84,10 +84,10 @@ function readReturnToFromRequest(fallbackSearchParams: URLSearchParams) {
   return DEFAULT_RETURN_TO;
 }
 
-async function buildOauthStart(req: Request) {
+async function buildOauthStart(req: Request, returnToOverride?: string) {
   const origin = resolveRequestOrigin(req);
   const url = new URL(req.url);
-  const returnTo = readReturnToFromRequest(url.searchParams);
+  const returnTo = returnToOverride?.trim() || readReturnToFromRequest(url.searchParams);
   const verified = await verifyBearerRequest(req);
   if (!verified.ok) {
     return { ok: false as const, origin, returnTo };
@@ -147,15 +147,10 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({})) as { returnTo?: unknown };
-    const requestUrl = new URL(req.url);
-    if (typeof body.returnTo === "string" && body.returnTo.trim()) {
-      requestUrl.searchParams.set("returnTo", body.returnTo.trim());
-    }
-    const requestWithQuery = new Request(requestUrl.toString(), {
-      method: req.method,
-      headers: req.headers,
-    });
-    const started = await buildOauthStart(requestWithQuery);
+    const started = await buildOauthStart(
+      req,
+      typeof body.returnTo === "string" ? body.returnTo.trim() : undefined,
+    );
     if (!started.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
