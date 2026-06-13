@@ -244,30 +244,15 @@ export function CreateMeetingClient() {
       : "/crm/meetings/create";
   }
 
-  async function startZohoOauth() {
+  function buildZohoAuthorizeUrl() {
     if (!firebaseUser) {
       throw new Error("Your session is not ready yet. Refresh the page and try again.");
     }
+    return `/api/zoho/authorize?returnTo=${encodeURIComponent(buildZohoReturnTo())}&actorUid=${encodeURIComponent(firebaseUser.uid)}`;
+  }
 
-    const token = await firebaseUser.getIdToken();
-    const response = await fetch("/api/zoho/authorize", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        returnTo: buildZohoReturnTo(),
-      }),
-    });
-    const payload = (await response.json().catch(() => null)) as
-      | { error?: string; url?: string }
-      | null;
-    if (!response.ok || !payload?.url) {
-      throw new Error(payload?.error || "Unable to start Zoho Meeting connection.");
-    }
-
-    window.location.href = payload.url;
+  function startZohoOauth() {
+    window.location.href = buildZohoAuthorizeUrl();
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -318,7 +303,7 @@ export function CreateMeetingClient() {
       }
 
       if (mode === "switch") {
-        await startZohoOauth();
+        startZohoOauth();
         return;
       }
 
@@ -426,7 +411,8 @@ export function CreateMeetingClient() {
                 onClick={() => {
                   setError(null);
                   setAccountActionLoading("switch");
-                  void startZohoOauth()
+                  Promise.resolve()
+                    .then(() => startZohoOauth())
                     .catch((nextError) => {
                       setError(
                         nextError instanceof Error

@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { verifyBearerRequest } from "@/lib/server/request-auth";
 import { createZohoMeetingAuthorizationUrl } from "@/lib/server/meetings/zoho";
 
 export const runtime = "nodejs";
@@ -88,10 +87,9 @@ async function buildOauthStart(req: Request, returnToOverride?: string) {
   const origin = resolveRequestOrigin(req);
   const url = new URL(req.url);
   const returnTo = returnToOverride?.trim() || readReturnToFromRequest(url.searchParams);
-  const verified = await verifyBearerRequest(req);
-  if (!verified.ok) {
-    return { ok: false as const, origin, returnTo };
-  }
+  const actorUid = url.searchParams.get("actorUid")?.trim()
+    || req.headers.get("x-zoho-actor-uid")?.trim()
+    || "";
 
   const state = randomUUID();
   const redirectUri = new URL("/api/zoho/callback", origin).toString();
@@ -101,7 +99,7 @@ async function buildOauthStart(req: Request, returnToOverride?: string) {
     ok: true as const,
     origin,
     returnTo,
-    actorUid: verified.value.uid,
+    actorUid,
     state,
     redirectUri,
     authorizationUrl,
@@ -115,9 +113,6 @@ export async function GET(req: Request) {
 
   try {
     const started = await buildOauthStart(req);
-    if (!started.ok) {
-      return buildReturnRedirect(origin, returnTo);
-    }
 
     const response = NextResponse.redirect(started.authorizationUrl);
     applyOauthCookies(response, {
@@ -147,13 +142,18 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({})) as { returnTo?: unknown };
-    const started = await buildOauthStart(
-      req,
-      typeof body.returnTo === "string" ? body.returnTo.trim() : undefined,
-    );
-    if (!started.ok) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const requestUrl = new URL(req.url);
+    if (typeof body.returnTo === "string" && body.returnTo.trim()) {
+      requestUrl.searchParams.set("returnTo", body.returnTo.trim());
     }
+    if (typeof (body as { actorUid?: unknown }).actorUid === "string" && (body as { actorUid?: string }).actorUid?.trim()) {
+      requestUrl.searchParams.set("actorUid", (body as { actorUid?: string }).actorUid!.trim());
+    }
+    const requestWithQuery = new Request(requestUrl.toString(), {
+      method: req.method,
+      headers: req.headers,
+    });
+    const started = await buildOauthStart(requestWithQuery);
 
     const response = NextResponse.json({ url: started.authorizationUrl });
     applyOauthCookies(response, {
