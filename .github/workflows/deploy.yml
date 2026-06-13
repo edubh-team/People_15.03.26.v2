@@ -50,9 +50,6 @@ jobs:
           SH: ${{ secrets.SERVER_HOST }}
           SU: ${{ secrets.SERVER_USER }}
           SK: ${{ secrets.SSH_PRIVATE_KEY }}
-          ZMCI: ${{ secrets.ZOHO_MEETING_CLIENT_ID || secrets.ZOHO_CLIENT_ID }}
-          ZMCS: ${{ secrets.ZOHO_MEETING_CLIENT_SECRET || secrets.ZOHO_CLIENT_SECRET }}
-          ZMRU: ${{ secrets.ZOHO_MEETING_REDIRECT_URI || secrets.ZOHO_REDIRECT_URI }}
         run: |
           if [ -z "$SH" ] || [ -z "$SU" ] || [ -z "$SK" ]; then
             echo "Missing required secrets: HOST, USERNAME, SSH_KEY"
@@ -63,12 +60,6 @@ jobs:
           if [[ "$SK" != *"-----BEGIN"* ]]; then
             echo "Error: SSH_PRIVATE_KEY does not look like a valid private key."
             echo "It should start with '-----BEGIN ... PRIVATE KEY-----'"
-            exit 1
-          fi
-          
-          if [ -z "$ZMCI" ] || [ -z "$ZMCS" ] || [ -z "$ZMRU" ]; then
-            echo "Missing required Zoho secrets."
-            echo "Please add ZOHO_MEETING_CLIENT_ID, ZOHO_MEETING_CLIENT_SECRET, and ZOHO_MEETING_REDIRECT_URI to GitHub Repository Secrets."
             exit 1
           fi
       - name: Deploy via SSH
