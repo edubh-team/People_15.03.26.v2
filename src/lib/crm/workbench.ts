@@ -733,10 +733,10 @@ export function sortWorkbenchLeads(
       case "new_leads":
         return (
           toSortableNumber(
-            parseDateValue(right.assignedAt) ?? parseDateValue(right.createdAt),
+            parseDateValue(left.assignedAt) ?? parseDateValue(left.createdAt),
           ) -
           toSortableNumber(
-            parseDateValue(left.assignedAt) ?? parseDateValue(left.createdAt),
+            parseDateValue(right.assignedAt) ?? parseDateValue(right.createdAt),
           )
         );
       case "worked_leads":
