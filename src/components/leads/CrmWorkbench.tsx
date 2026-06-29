@@ -970,7 +970,8 @@ export function CrmWorkbench({
       setBulkAssignMessage("Enter a valid lead count greater than 0.");
       return;
     }
-    const topIds = activeLeads.slice(0, requested).map((lead) => lead.leadId);
+    const countToSelect = Math.min(requested, activeLeads.length);
+    const topIds = activeLeads.slice(0, countToSelect).map((lead) => lead.leadId);
     setSelectedLeadIds(topIds);
     setBulkAssignMessage(`Selected ${topIds.length} lead${topIds.length === 1 ? "" : "s"} from the current queue order.`);
   }
@@ -2029,6 +2030,7 @@ export function CrmWorkbench({
                 <input
                   type="number"
                   min="1"
+                  max={activeLeads.length}
                   value={bulkSelectCount}
                   onChange={(event) => setBulkSelectCount(event.target.value)}
                   className="w-24 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700"
@@ -2038,7 +2040,7 @@ export function CrmWorkbench({
                   onClick={selectTopCountLeads}
                   className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
                 >
-                  Select top N
+                  Select leads
                 </button>
                 <select
                   value={bulkAssignTargetUid}
