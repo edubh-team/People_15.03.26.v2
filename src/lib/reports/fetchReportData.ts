@@ -1,14 +1,28 @@
 import { db } from "@/lib/firebase/client";
-import { collection, query, where, getDocs, Timestamp, QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  Timestamp,
+  where,
+  type DocumentData,
+  type QueryDocumentSnapshot,
+} from "firebase/firestore";
 import { getAttendanceDaysForMonth } from "@/lib/firebase/attendance";
 import { getLeadStatusVariants, isPaymentFollowUpStatus, normalizeLeadStatus } from "@/lib/leads/status";
 import type { LeadDoc } from "@/lib/types/crm";
-import { startOfMonth, endOfMonth, format } from "date-fns";
+import { endOfMonth, format, startOfMonth, subDays } from "date-fns";
+
+export type ReportScope = "last_30_days" | "this_month" | "all_time";
 
 export type ReportData = {
   employeeId: string;
   employeeName: string; // Fetch from user doc or pass as prop
-  reportMonth: string; // "January 2026"
+  reportTitle: string;
+  reportPeriodLabel: string;
+  reportMonth: string; // Back-compat label used in file name
   generatedDate: string;
   
   attendance: {
@@ -54,52 +68,86 @@ function toDate(val: unknown): Date | null {
   return null;
 }
 
-export async function fetchReportData(employeeId: string, targetMonth: Date): Promise<ReportData> {
-  if (!db) throw new Error("Firebase not initialized");
+function toDayStart(value: Date) {
+  const d = new Date(value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
-  const start = startOfMonth(targetMonth);
-  const end = endOfMonth(targetMonth);
-  const year = targetMonth.getFullYear();
-  const monthIndex = targetMonth.getMonth(); // 0-based
-  
-  const startKey = format(start, "yyyy-MM-dd");
-  const endKey = format(end, "yyyy-MM-dd");
+function toDayEnd(value: Date) {
+  const d = new Date(value);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
 
-  // 1. Fetch User Details (for name and ID)
+function sanitizeDateRangeEnd(end: Date) {
+  const now = new Date();
+  return end > now ? now : end;
+}
+
+async function resolveEmployeeIdentity(employeeUid: string) {
   let employeeName = "Unknown Employee";
-  let displayEmployeeId = employeeId; // Default to UID if actual employeeId is missing
+  let displayEmployeeId = employeeUid;
+  let joiningDate: Date | null = null;
 
   try {
-    const userSnap = await getDocs(query(collection(db, "users"), where("uid", "==", employeeId)));
-    if (!userSnap.empty) {
-      const userData = userSnap.docs[0].data();
-      employeeName = userData.displayName || userData.email || "Employee";
-      if (userData.employeeId) {
-        displayEmployeeId = userData.employeeId;
+    if (!db) throw new Error("Firebase not initialized");
+    const snap = await getDoc(doc(db, "users", employeeUid));
+    if (snap.exists()) {
+      const userData = snap.data() as Record<string, unknown>;
+      employeeName = String(userData.displayName ?? userData.email ?? "Employee");
+      if (typeof userData.employeeId === "string" && userData.employeeId.trim()) {
+        displayEmployeeId = userData.employeeId.trim();
       }
+      joiningDate = toDate(userData.joiningDate) ?? toDate(userData.createdAt);
+      return { employeeName, displayEmployeeId, joiningDate };
     }
   } catch (e) {
-    console.error("Error fetching user", e);
+    console.error("Error fetching user (doc)", e);
   }
 
-  // 2. Fetch Attendance
+  try {
+    if (!db) throw new Error("Firebase not initialized");
+    const userSnap = await getDocs(query(collection(db, "users"), where("uid", "==", employeeUid)));
+    if (!userSnap.empty) {
+      const userData = userSnap.docs[0].data() as Record<string, unknown>;
+      employeeName = String(userData.displayName ?? userData.email ?? "Employee");
+      if (typeof userData.employeeId === "string" && userData.employeeId.trim()) {
+        displayEmployeeId = userData.employeeId.trim();
+      }
+      joiningDate = toDate(userData.joiningDate) ?? toDate(userData.createdAt);
+    }
+  } catch (e) {
+    console.error("Error fetching user (query)", e);
+  }
+
+  return { employeeName, displayEmployeeId, joiningDate };
+}
+
+async function getAttendanceStatsForRange(employeeUid: string, start: Date, end: Date) {
   let presentDays = 0;
   let lateLogins = 0;
   let totalWorkingDays = 0;
-  
+
+  const startBound = toDayStart(start);
+  const endBound = toDayEnd(sanitizeDateRangeEnd(end));
+
   try {
-    const days = await getAttendanceDaysForMonth(employeeId, year, monthIndex);
-    // Filter days that are actually in the month (getAttendanceDaysForMonth returns up to 62 days sometimes? No, it queries by path yyyy/months/mm so it should be exact)
-    // But let's be safe.
-    
-    // Calculate stats
-    // Assuming standard working days (exclude Sundays? or just count days with status)
-    // "Total Present Days" = present/late day status or active attendance status.
-    // "Late Logins" = checkInTime > 11:10 AM
-    
-    days.forEach(day => {
-        const status = (day.status ?? "").toLowerCase();
-        const dayStatus = (day.dayStatus ?? "").toLowerCase();
+    const cursor = new Date(startBound.getFullYear(), startBound.getMonth(), 1);
+    const last = new Date(endBound.getFullYear(), endBound.getMonth(), 1);
+
+    while (cursor <= last) {
+      const year = cursor.getFullYear();
+      const monthIndex0 = cursor.getMonth();
+      const rows = await getAttendanceDaysForMonth(employeeUid, year, monthIndex0);
+      rows.forEach((day) => {
+        const dateKey = String((day as Record<string, unknown>).dateKey ?? "");
+        if (!dateKey) return;
+        const inRange = dateKey >= format(startBound, "yyyy-MM-dd") && dateKey <= format(endBound, "yyyy-MM-dd");
+        if (!inRange) return;
+
+        const status = String((day as Record<string, unknown>).status ?? "").toLowerCase();
+        const dayStatus = String((day as Record<string, unknown>).dayStatus ?? "").toLowerCase();
         const isPresentDay =
           dayStatus === "present" ||
           dayStatus === "late" ||
@@ -108,36 +156,58 @@ export async function fetchReportData(employeeId: string, targetMonth: Date): Pr
           status === "on_break" ||
           status === "present";
 
-        if (isPresentDay) {
-            presentDays++;
-            // Check late
-            if (day.checkedInAt) {
-                const checkIn = toDate(day.checkedInAt);
-                if (checkIn) {
-                    const threshold = new Date(checkIn);
-                    threshold.setHours(11, 10, 0, 0);
-                    if (checkIn > threshold) {
-                        lateLogins++;
-                    }
-                }
-            }
+        if (!isPresentDay) return;
+
+        presentDays += 1;
+        const checkedInAt = (day as Record<string, unknown>).checkedInAt;
+        if (checkedInAt) {
+          const checkIn = toDate(checkedInAt);
+          if (checkIn) {
+            const threshold = new Date(checkIn);
+            threshold.setHours(11, 10, 0, 0);
+            if (checkIn > threshold) lateLogins += 1;
+          }
         }
-    });
-    
-    // Approximate working days as days in month excluding Sundays, or just use 26?
-    // Let's count days passed so far in month or total days in month
-    // For now, let's just say total days in month excluding weekends if we want %, 
-    // or just use 30/31. Let's use 26 as standard or just count business days.
-    // Simpler: Total days in month - Sundays.
-    const d = new Date(start);
-    while (d <= end) {
-        if (d.getDay() !== 0) totalWorkingDays++;
-        d.setDate(d.getDate() + 1);
+      });
+      cursor.setMonth(cursor.getMonth() + 1);
     }
 
+    const d = new Date(startBound);
+    while (d <= endBound) {
+      if (d.getDay() !== 0) totalWorkingDays += 1;
+      d.setDate(d.getDate() + 1);
+    }
   } catch (e) {
-    console.error("Error fetching attendance", e);
+    console.error("Error fetching attendance range", e);
   }
+
+  return { presentDays, lateLogins, totalWorkingDays };
+}
+
+async function fetchReportDataForRange(input: {
+  employeeUid: string;
+  start: Date;
+  end: Date;
+  reportTitle: string;
+  reportPeriodLabel: string;
+}): Promise<ReportData> {
+  if (!db) throw new Error("Firebase not initialized");
+
+  const start = toDayStart(input.start);
+  const end = toDayEnd(sanitizeDateRangeEnd(input.end));
+  
+  const startKey = format(start, "yyyy-MM-dd");
+  const endKey = format(end, "yyyy-MM-dd");
+
+  // 1. Fetch User Details (for name and ID)
+  const { employeeName, displayEmployeeId } = await resolveEmployeeIdentity(input.employeeUid);
+
+  // 2. Fetch Attendance
+  const { presentDays, lateLogins, totalWorkingDays } = await getAttendanceStatsForRange(
+    input.employeeUid,
+    start,
+    end,
+  );
 
   // 3. Fetch Leads & Sales
   // Strategy:
@@ -150,17 +220,17 @@ export async function fetchReportData(employeeId: string, targetMonth: Date): Pr
   // Parallel Queries
   const [createdSnap, contactedSnap, closedSnap] = await Promise.all([
     getDocs(query(leadsRef, 
-        where("ownerUid", "==", employeeId),
+        where("ownerUid", "==", input.employeeUid),
         where("createdDateKey", ">=", startKey),
         where("createdDateKey", "<=", endKey)
     )),
     getDocs(query(leadsRef, 
-        where("ownerUid", "==", employeeId),
+        where("ownerUid", "==", input.employeeUid),
         where("lastContactDateKey", ">=", startKey),
         where("lastContactDateKey", "<=", endKey)
     )),
     getDocs(query(leadsRef, 
-        where("ownerUid", "==", employeeId),
+        where("ownerUid", "==", input.employeeUid),
         where("status", "in", getLeadStatusVariants("closed", "paymentfollowup"))
         // Note: we'll filter by closedAt date in memory because we might not have a closedDateKey index
     ))
@@ -237,7 +307,7 @@ export async function fetchReportData(employeeId: string, targetMonth: Date): Pr
     // If status is PaymentFollowUp, we strictly require enrollment or UTR to count as Sale/Revenue
     // For 'closed' status (legacy), we assume it's a sale.
     // Also verify that the deal was closed by this user (or they are the owner getting credit)
-    const isClosedByUser = (data.closedBy?.uid === employeeId) || (data.ownerUid === employeeId);
+    const isClosedByUser = (data.closedBy?.uid === input.employeeUid) || (data.ownerUid === input.employeeUid);
     
     const normalizedStatus = normalizeLeadStatus(data.status);
     const isValidSale = (
@@ -263,7 +333,9 @@ export async function fetchReportData(employeeId: string, targetMonth: Date): Pr
   return {
     employeeId: displayEmployeeId,
     employeeName,
-    reportMonth: format(targetMonth, "MMMM yyyy"),
+    reportTitle: input.reportTitle,
+    reportPeriodLabel: input.reportPeriodLabel,
+    reportMonth: input.reportPeriodLabel,
     generatedDate: format(new Date(), "dd MMM yyyy"),
     attendance: {
         presentDays,
@@ -286,4 +358,56 @@ export async function fetchReportData(employeeId: string, targetMonth: Date): Pr
         totalCalls
     }
   };
+}
+
+export async function fetchReportData(employeeUid: string, targetMonth: Date): Promise<ReportData> {
+  const start = startOfMonth(targetMonth);
+  const end = endOfMonth(targetMonth);
+  return fetchReportDataForRange({
+    employeeUid,
+    start,
+    end,
+    reportTitle: "Monthly Performance Report",
+    reportPeriodLabel: format(targetMonth, "MMMM yyyy"),
+  });
+}
+
+export async function fetchReportDataForScope(employeeUid: string, scope: ReportScope): Promise<ReportData> {
+  const today = new Date();
+  const nowBound = toDayEnd(today);
+
+  if (scope === "this_month") {
+    const monthStart = startOfMonth(today);
+    const monthEnd = endOfMonth(today);
+    return fetchReportDataForRange({
+      employeeUid,
+      start: monthStart,
+      end: sanitizeDateRangeEnd(monthEnd),
+      reportTitle: "Monthly Performance Report",
+      reportPeriodLabel: format(today, "MMMM yyyy"),
+    });
+  }
+
+  if (scope === "last_30_days") {
+    const start = subDays(nowBound, 30);
+    const end = nowBound;
+    return fetchReportDataForRange({
+      employeeUid,
+      start,
+      end,
+      reportTitle: "Monthly Performance Report",
+      reportPeriodLabel: `Last 30 Days (${format(start, "dd MMM yyyy")} - ${format(end, "dd MMM yyyy")})`,
+    });
+  }
+
+  const { joiningDate } = await resolveEmployeeIdentity(employeeUid);
+  const start = joiningDate ? toDayStart(joiningDate) : new Date(2000, 0, 1);
+  const end = nowBound;
+  return fetchReportDataForRange({
+    employeeUid,
+    start,
+    end,
+    reportTitle: "All Time Performance Report",
+    reportPeriodLabel: `All Time (${format(start, "dd MMM yyyy")} - ${format(end, "dd MMM yyyy")})`,
+  });
 }

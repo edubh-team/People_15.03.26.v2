@@ -170,8 +170,8 @@ export default function EmployeeReportDocument({ data }: { data: ReportData }) {
              <Text style={styles.subtitle}>People & Performance</Text>
           </View>
           <View style={styles.headerRight}>
-            <Text style={styles.title}>Monthly Performance Report</Text>
-            <Text style={styles.subtitle}>{data.reportMonth}</Text>
+            <Text style={styles.title}>{data.reportTitle}</Text>
+            <Text style={styles.subtitle}>{data.reportPeriodLabel}</Text>
             <Text style={{ fontSize: 8, marginTop: 4 }}>Generated: {data.generatedDate}</Text>
           </View>
         </View>
