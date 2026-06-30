@@ -265,7 +265,7 @@ export async function GET(request: Request) {
       const timezone = person.timezone || businessTimeZone;
       const localHour = getLocalHour(now, timezone);
 
-      if (localHour < 18) {
+      if (localHour < 9) {
         skipped += 1;
         continue;
       }
