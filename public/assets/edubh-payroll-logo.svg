@@ -1,0 +1,7 @@
+<svg width="240" height="72" viewBox="0 0 240 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="72" height="72" rx="20" fill="#0F172A"/>
+  <path d="M18 22H48C55.1797 22 61 27.8203 61 35C61 42.1797 55.1797 48 48 48H18V22Z" fill="#2563EB"/>
+  <path d="M27 30H47C49.7614 30 52 32.2386 52 35C52 37.7614 49.7614 40 47 40H27V30Z" fill="#BFDBFE"/>
+  <text x="90" y="31" fill="#0F172A" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">EduBh</text>
+  <text x="90" y="53" fill="#475569" font-family="Arial, Helvetica, sans-serif" font-size="14">Learning. Careers. Growth.</text>
+</svg>

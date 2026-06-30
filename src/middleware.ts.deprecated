@@ -1,0 +1,28 @@
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+
+const PROTECTED_PREFIXES = ["/dashboard", "/attendance", "/tasks", "/crm", "/admin"];
+
+function isProtected(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+}
+
+export function middleware(req: NextRequest) {
+  console.log("MW: Request", req.nextUrl.pathname);
+  const hasSession = Boolean(req.cookies.get("session_token")?.value);
+
+  if (isProtected(req) && !hasSession) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.searchParams.set("expired", "1");
+    url.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ["/((?!.*\\.).*)"], // all routes except files with extensions
+};
