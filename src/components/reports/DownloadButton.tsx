@@ -3,23 +3,23 @@
 import { useState } from "react";
 import { ArrowDownTrayIcon, ArrowPathIcon, LockClosedIcon } from "@heroicons/react/24/outline";
 import { pdf } from "@react-pdf/renderer";
-import { fetchReportData, type ReportData } from "@/lib/reports/fetchReportData";
+import { fetchReportDataForScope, type ReportData, type ReportScope } from "@/lib/reports/fetchReportData";
 import EmployeeReportDocument from "@/components/pdf/EmployeeReportDocument";
-import { isSameMonth, endOfMonth, getDate } from "date-fns";
+import { endOfMonth, getDate } from "date-fns";
 
 type Props = {
   employeeId: string;
-  month: Date;
+  scope: ReportScope;
   className?: string;
 };
 
-export default function DownloadReportButton({ employeeId, month, className = "" }: Props) {
+export default function DownloadReportButton({ employeeId, scope, className = "" }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Availability Logic: Only allow download in the last 3 days of the month for the current month
+  // Availability Logic: Only lock monthly generation for the current month (last 3 days).
   const today = new Date();
-  const isCurrentMonth = isSameMonth(month, today);
+  const isCurrentMonth = scope === "this_month";
   
   let isAvailable = true;
   let availabilityMessage = "";
@@ -45,7 +45,7 @@ export default function DownloadReportButton({ employeeId, month, className = ""
       setError(null);
 
       // 1. Fetch Data
-      const data: ReportData = await fetchReportData(employeeId, month);
+      const data: ReportData = await fetchReportDataForScope(employeeId, scope);
 
       // 2. Generate PDF Blob
       // We use the pdf() function from @react-pdf/renderer to generate a blob imperatively
@@ -55,7 +55,9 @@ export default function DownloadReportButton({ employeeId, month, className = ""
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `Performance_Report_${data.employeeName.replace(/\s+/g, "_")}_${data.reportMonth.replace(/\s+/g, "_")}.pdf`;
+      const safeEmployeeName = data.employeeName.replace(/\s+/g, "_");
+      const safePeriod = data.reportPeriodLabel.replace(/[^\w]+/g, "_");
+      link.download = `Performance_Report_${safeEmployeeName}_${safePeriod}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -90,7 +92,7 @@ export default function DownloadReportButton({ employeeId, month, className = ""
             ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200" 
             : "bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed"
           } ${className}`}
-        title={!isAvailable ? availabilityMessage : "Download Monthly Report"}
+        title={!isAvailable ? availabilityMessage : "Download PDF Report"}
       >
         {loading ? (
           <>

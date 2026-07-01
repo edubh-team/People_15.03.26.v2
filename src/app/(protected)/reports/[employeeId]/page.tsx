@@ -42,12 +42,13 @@ import {
     BanknotesIcon
   } from "@heroicons/react/24/outline";
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from "@headlessui/react";
-import { format, subDays, isBefore } from "date-fns";
+import { endOfDay, format, isBefore, startOfDay, startOfMonth, subDays } from "date-fns";
 import { useAttendanceMonth, useHolidaysMonth } from "@/lib/hooks/useAttendance";
 import AttendanceCalendarModal from "@/components/team/AttendanceCalendarModal";
 import DownloadReportButton from "@/components/reports/DownloadButton";
 import { isPaymentFollowUpStatus, normalizeLeadStatus } from "@/lib/leads/status";
 import { getTaskLeadIntegrity, normalizeTaskDoc } from "@/lib/tasks/model";
+import type { ReportScope } from "@/lib/reports/fetchReportData";
 
 // Types
 import type { LeadDoc } from "@/lib/types/crm";
@@ -75,6 +76,25 @@ type Metrics = {
   statusDistribution: { name: string; value: number }[];
   dailyActivity: { date: string; calls: number }[];
 };
+
+function toDateValue(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Date) return val;
+  if (val instanceof Timestamp) return val.toDate();
+  if (typeof val === "string" || typeof val === "number") {
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof val === "object" && val !== null && "seconds" in val) {
+    const seconds = Number((val as { seconds?: unknown }).seconds);
+    if (Number.isFinite(seconds)) return new Date(seconds * 1000);
+  }
+  return null;
+}
+
+function toDateKey(date: Date) {
+  return format(date, "yyyy-MM-dd");
+}
 
 export default function EmployeeReportPage() {
   const params = useParams();
@@ -120,9 +140,11 @@ export default function EmployeeReportPage() {
     return stats;
   }, [attendanceData, holidaysData]);
 
+  const [dataScope, setDataScope] = useState<ReportScope>("last_30_days");
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [unattendedLeads, setUnattendedLeads] = useState<LeadDoc[]>([]);
   const [allLeads, setAllLeads] = useState<LeadDoc[]>([]);
+  const [rawLeads, setRawLeads] = useState<LeadDoc[]>([]);
   const [targetAgent, setTargetAgent] = useState('');
   const [shuffleReason, setShuffleReason] = useState("");
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
@@ -319,103 +341,7 @@ export default function EmployeeReportPage() {
             const tB = getTime(b.lastActionAt) || getTime(b.updatedAt) || getTime(b.createdAt);
             return tB - tA;
         });
-        
-        // A. Calculate Metrics
-        let totalCalls = 0;
-        let contactedCount = 0;
-        let convertedCount = 0;
-        const statusCounts: Record<string, number> = {};
-        const activityMap: Record<string, number> = {};
-        const unattended: LeadDoc[] = [];
-        const converted: LeadDoc[] = [];
-        const sevenDaysAgo = subDays(new Date(), 7);
-
-        setAllLeads(leads); // Update all leads state for portfolio view
-
-        leads.forEach(lead => {
-            // Status Distribution
-            const status = normalizeLeadStatus(lead.status);
-            statusCounts[status] = (statusCounts[status] || 0) + 1;
-
-            // Activity Metrics
-            const activityHistory = lead.activityHistory || [];
-            const callCount = activityHistory.filter(a => a.type === 'contacted').length; 
-            const attempts = callCount > 0 ? callCount : (lead.history?.length || 0); 
-            
-            totalCalls += attempts;
-            if (status !== 'new') contactedCount++;
-            
-            // Calculate Conversion:
-            const isClosedStatus = status === 'closed';
-            const isPaymentEnrollment = isPaymentFollowUpStatus(status) && 
-                (lead.subStatus === 'Enrollment Generated' || lead.subStatus === 'UTR (Loan Details)' || lead.subStatus === 'UTR Details' || !!lead.enrollmentDetails);
-            
-            const isClosedByThisUser = lead.closedBy?.uid === employeeId || 
-                (lead.isSelfGenerated && lead.createdBy?.uid === employeeId);
-
-            if ((isClosedStatus || isPaymentEnrollment) && isClosedByThisUser) {
-                convertedCount++;
-                converted.push(lead);
-            }
-
-            // Daily Activity (last 7 days)
-            activityHistory.forEach(activity => {
-                if (activity.at) {
-                    let date: Date;
-                    if (activity.at instanceof Timestamp) date = activity.at.toDate();
-                    else if (typeof activity.at === 'string') date = new Date(activity.at);
-                    else return; 
-
-                    const dateKey = format(date, 'MMM dd');
-                    activityMap[dateKey] = (activityMap[dateKey] || 0) + 1;
-                }
-            });
-
-            // Unattended Logic
-            let lastActionDate: Date | null = null;
-            if (lead.updatedAt) {
-                if (lead.updatedAt instanceof Timestamp) lastActionDate = lead.updatedAt.toDate();
-                else if (typeof lead.updatedAt === 'string') lastActionDate = new Date(lead.updatedAt);
-            } else if (lead.createdAt) {
-                if (lead.createdAt instanceof Timestamp) lastActionDate = lead.createdAt.toDate();
-                else if (typeof lead.createdAt === 'string') lastActionDate = new Date(lead.createdAt);
-            }
-
-            if (status === 'new') {
-                if (!lastActionDate || isBefore(lastActionDate, sevenDaysAgo)) {
-                    unattended.push(lead);
-                }
-            }
-        });
-
-        const totalAssigned = leads.length;
-        const avgAttempts = totalAssigned > 0 ? (totalCalls / totalAssigned).toFixed(1) : "0";
-        const conversion = totalAssigned > 0 ? ((convertedCount / totalAssigned) * 100).toFixed(1) : "0";
-
-        // Format Chart Data
-        const statusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
-        
-        const dailyData = [];
-        for (let i = 6; i >= 0; i--) {
-            const d = subDays(new Date(), i);
-            const key = format(d, 'MMM dd');
-            dailyData.push({
-                date: key,
-                calls: activityMap[key] || 0
-            });
-        }
-
-        setMetrics({
-            totalAssigned,
-            contacted: contactedCount,
-            avgAttempts: Number(avgAttempts),
-            conversion: Number(conversion),
-            statusDistribution: statusData,
-            dailyActivity: dailyData
-        });
-
-        setUnattendedLeads(unattended);
-        setConvertedLeads(converted);
+        setRawLeads(leads);
         setLoading(false);
     };
 
@@ -449,6 +375,139 @@ export default function EmployeeReportPage() {
         unsub3();
     };
   }, [employeeId]);
+
+  useEffect(() => {
+    if (!employeeId) return;
+
+    const today = new Date();
+    const scopeEnd = endOfDay(today);
+    const scopeStart =
+      dataScope === "this_month"
+        ? startOfMonth(today)
+        : dataScope === "last_30_days"
+          ? startOfDay(subDays(today, 30))
+          : startOfDay(toDateValue(employee?.joiningDate) ?? toDateValue(employee?.createdAt) ?? new Date(2000, 0, 1));
+
+    const startKey = toDateKey(scopeStart);
+    const endKey = toDateKey(scopeEnd);
+
+    const isLeadInScope = (lead: LeadDoc) => {
+      if (dataScope === "all_time") return true;
+
+      const createdKey = lead.createdDateKey;
+      if (createdKey && createdKey >= startKey && createdKey <= endKey) return true;
+
+      const lastContactKey = lead.lastContactDateKey;
+      if (lastContactKey && lastContactKey >= startKey && lastContactKey <= endKey) return true;
+
+      const closedAt = toDateValue(lead.enrollmentDetails?.closedAt ?? lead.closedAt ?? null);
+      if (closedAt) {
+        const closedKey = toDateKey(closedAt);
+        if (closedKey >= startKey && closedKey <= endKey) return true;
+      }
+
+      const lastAction = toDateValue(lead.lastActionAt ?? lead.updatedAt ?? lead.createdAt);
+      if (lastAction) {
+        const actionKey = toDateKey(lastAction);
+        if (actionKey >= startKey && actionKey <= endKey) return true;
+      }
+
+      return false;
+    };
+
+    const scopedLeads = dataScope === "all_time" ? rawLeads : rawLeads.filter(isLeadInScope);
+    setAllLeads(scopedLeads);
+
+    let totalCalls = 0;
+    let contactedCount = 0;
+    let convertedCount = 0;
+    const statusCounts: Record<string, number> = {};
+    const activityMap: Record<string, number> = {};
+    const unattended: LeadDoc[] = [];
+    const converted: LeadDoc[] = [];
+    const sevenDaysAgo = subDays(today, 7);
+    const activityWindowStart = startOfDay(subDays(today, 6));
+    const activityWindowEnd = endOfDay(today);
+
+    scopedLeads.forEach((lead) => {
+      const status = normalizeLeadStatus(lead.status);
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+      const activityHistory = lead.activityHistory || [];
+      const wasContactedInScope =
+        (lead.lastContactDateKey ? lead.lastContactDateKey >= startKey && lead.lastContactDateKey <= endKey : false) ||
+        activityHistory.some((a) => {
+          if (a.type !== "contacted" && a.type !== "outgoing_call") return false;
+          const at = toDateValue(a.at);
+          if (!at) return false;
+          return at >= scopeStart && at <= scopeEnd;
+        });
+
+      if (wasContactedInScope) contactedCount += 1;
+
+      activityHistory.forEach((a) => {
+        if (a.type !== "contacted" && a.type !== "outgoing_call") return;
+        const at = toDateValue(a.at);
+        if (!at) return;
+        if (at >= scopeStart && at <= scopeEnd) totalCalls += 1;
+
+        if (at >= activityWindowStart && at <= activityWindowEnd) {
+          const key = format(at, "MMM dd");
+          activityMap[key] = (activityMap[key] || 0) + 1;
+        }
+      });
+
+      const isClosedStatus = status === "closed";
+      const isPaymentEnrollment =
+        isPaymentFollowUpStatus(status) &&
+        (lead.subStatus === "Enrollment Generated" ||
+          lead.subStatus === "UTR (Loan Details)" ||
+          lead.subStatus === "UTR Details" ||
+          !!lead.enrollmentDetails);
+
+      const isClosedByThisUser =
+        lead.closedBy?.uid === employeeId || (lead.isSelfGenerated && lead.createdBy?.uid === employeeId);
+
+      const closedAt = toDateValue(lead.enrollmentDetails?.closedAt ?? lead.closedAt ?? lead.updatedAt ?? lead.createdAt);
+      const isClosedInScope = closedAt ? closedAt >= scopeStart && closedAt <= scopeEnd : false;
+
+      if ((isClosedStatus || isPaymentEnrollment) && isClosedByThisUser && isClosedInScope) {
+        convertedCount += 1;
+        converted.push(lead);
+      }
+
+      const lastActionDate = toDateValue(lead.lastActionAt ?? lead.updatedAt ?? lead.createdAt);
+      if (status === "new") {
+        if (!lastActionDate || isBefore(lastActionDate, sevenDaysAgo)) {
+          unattended.push(lead);
+        }
+      }
+    });
+
+    const totalAssigned = scopedLeads.length;
+    const avgAttempts = totalAssigned > 0 ? (totalCalls / totalAssigned).toFixed(1) : "0";
+    const conversion = totalAssigned > 0 ? ((convertedCount / totalAssigned) * 100).toFixed(1) : "0";
+
+    const statusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+    const dailyData = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = subDays(today, i);
+      const key = format(d, "MMM dd");
+      dailyData.push({ date: key, calls: activityMap[key] || 0 });
+    }
+
+    setMetrics({
+      totalAssigned,
+      contacted: contactedCount,
+      avgAttempts: Number(avgAttempts),
+      conversion: Number(conversion),
+      statusDistribution: statusData,
+      dailyActivity: dailyData,
+    });
+
+    setUnattendedLeads(unattended);
+    setConvertedLeads(converted);
+  }, [dataScope, employee?.createdAt, employee?.joiningDate, employeeId, rawLeads]);
 
   // 4. Shuffle Logic
   const handleSelectAll = () => {
@@ -659,15 +718,19 @@ export default function EmployeeReportPage() {
          <div className="flex flex-col md:flex-row items-center gap-4 self-start md:self-center">
            <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-xl border border-gray-200 shadow-sm">
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2">Data Scope</span>
-              <select className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer">
-                <option>Last 30 Days</option>
-                <option>This Month</option>
-                <option>All Time</option>
+              <select
+                value={dataScope}
+                onChange={(e) => setDataScope(e.target.value as ReportScope)}
+                className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer"
+              >
+                <option value="last_30_days">Last 30 Days</option>
+                <option value="this_month">This Month</option>
+                <option value="all_time">All Time</option>
               </select>
            </div>
            <DownloadReportButton 
              employeeId={employeeId} 
-             month={new Date()} 
+             scope={dataScope} 
            />
          </div>
       </div>
