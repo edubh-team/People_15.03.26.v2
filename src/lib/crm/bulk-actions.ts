@@ -165,6 +165,14 @@ function buildProjectedRollbackSnapshot(input: {
   };
 }
 
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<BulkLeadActionResult> {
   if (!db) throw new Error("Firebase is not configured");
   if (input.leads.length === 0) {
@@ -199,7 +207,16 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
     originalLead: LeadDoc;
     nextLead: LeadDoc;
   };
+  type PreparedLeadMutation = {
+    lead: LeadDoc;
+    updates: Record<string, unknown>;
+    transferLead: LeadDoc | null;
+    transferRecord: ReturnType<typeof buildLeadTransferMutation>["transferRecord"] | null;
+    nextLead: LeadDoc;
+  };
   const sideEffectCandidates: SideEffectCandidate[] = [];
+  const pendingWrites: PreparedLeadMutation[] = [];
+  const MAX_LEADS_PER_BATCH = 150;
 
   const recordLeadFailure = async (
     leadId: string,
@@ -257,6 +274,87 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
 
   let updated = 0;
   let processed = 0;
+
+  const flushHeartbeat = async () => {
+    await heartbeat({
+      updated,
+      writeFailureCount: writeFailures.length,
+    });
+  };
+
+  const commitPreparedWrites = async (prepared: PreparedLeadMutation[]) => {
+    if (prepared.length === 0) return;
+    try {
+      const leadBatch = writeBatch(firestore);
+      prepared.forEach((candidate) => {
+        const leadRef = doc(firestore, "leads", candidate.lead.leadId);
+        const timelineRef = doc(collection(firestore, "leads", candidate.lead.leadId, "timeline"));
+        const changeRef = doc(
+          firestore,
+          "crm_bulk_actions",
+          batchId,
+          "lead_changes",
+          candidate.lead.leadId,
+        );
+
+        leadBatch.update(leadRef, candidate.updates);
+        leadBatch.set(timelineRef, {
+          type: assignToUid ? "reassigned" : "bulk_action_applied",
+          summary: assignToUid ? "Bulk assignment applied" : "Bulk queue action applied",
+          actor: input.actor,
+          metadata: {
+            batchId,
+            assignTo: assignToUid,
+            transferReason: transferReason || null,
+            transfer: candidate.transferRecord,
+            status: input.status ?? null,
+            followUpAt: input.followUpAt ? input.followUpAt.toISOString() : null,
+            source: input.source ?? null,
+            campaignName: input.campaignName ?? null,
+            remarks: input.remarks?.trim() || null,
+          },
+          createdAt: serverTimestamp(),
+        });
+        leadBatch.set(changeRef, {
+          leadId: candidate.lead.leadId,
+          summary,
+          transfer: candidate.transferRecord,
+          before: buildRollbackLeadSnapshot(candidate.lead),
+          after: buildProjectedRollbackSnapshot({
+            lead: candidate.lead,
+            action: { ...input, assignTo: assignToUid },
+            transferLead: candidate.transferLead,
+          }),
+          rollbackReady: true,
+          batchId,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      await leadBatch.commit();
+      updated += prepared.length;
+      prepared.forEach((candidate) => {
+        sideEffectCandidates.push({
+          leadId: candidate.lead.leadId,
+          originalLead: candidate.lead,
+          nextLead: candidate.nextLead,
+        });
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      for (const candidate of prepared) {
+        writeFailures.push({
+          leadId: candidate.lead.leadId,
+          step: "write_commit",
+          error: message,
+        });
+        await recordLeadFailure(candidate.lead.leadId, "write_commit", message);
+      }
+    } finally {
+      processed += prepared.length;
+      await flushHeartbeat();
+    }
+  };
 
   try {
     for (const lead of input.leads) {
@@ -383,135 +481,76 @@ export async function applyBulkLeadActions(input: BulkLeadActionInput): Promise<
         });
         await recordLeadFailure(lead.leadId, "write_validation", message);
         processed += 1;
-        if (processed % 20 === 0 || processed === requested) {
-          await heartbeat({
-            updated,
-            writeFailureCount: writeFailures.length,
-          });
-        }
+        await flushHeartbeat();
         continue;
       }
 
-      try {
-        const leadBatch = writeBatch(firestore);
-        const leadRef = doc(firestore, "leads", lead.leadId);
-        const timelineRef = doc(collection(firestore, "leads", lead.leadId, "timeline"));
-        const changeRef = doc(
-          firestore,
-          "crm_bulk_actions",
-          batchId,
-          "lead_changes",
-          lead.leadId,
-        );
-
-        leadBatch.update(leadRef, updates as Record<string, unknown>);
-        leadBatch.set(timelineRef, {
-          type: assignToUid ? "reassigned" : "bulk_action_applied",
-          summary: assignToUid ? "Bulk assignment applied" : "Bulk queue action applied",
-          actor: input.actor,
-          metadata: {
-            batchId,
-            assignTo: assignToUid,
-            transferReason: transferReason || null,
-            transfer: transferRecord,
-            status: input.status ?? null,
-            followUpAt: input.followUpAt ? input.followUpAt.toISOString() : null,
-            source: input.source ?? null,
-            campaignName: input.campaignName ?? null,
-            remarks: input.remarks?.trim() || null,
-          },
-          createdAt: serverTimestamp(),
-        });
-        leadBatch.set(changeRef, {
-          leadId: lead.leadId,
-          summary,
-          transfer: transferRecord,
-          before: buildRollbackLeadSnapshot(lead),
-          after: buildProjectedRollbackSnapshot({
-            lead,
-            action: { ...input, assignTo: assignToUid },
-            transferLead,
-          }),
-          rollbackReady: true,
-          batchId,
-          createdAt: serverTimestamp(),
-        });
-        await leadBatch.commit();
-        updated += 1;
-
-        if (nextLead) {
-          sideEffectCandidates.push({
-            leadId: lead.leadId,
-            originalLead: lead,
-            nextLead,
-          });
-        }
-      } catch (error) {
-        const message = getErrorMessage(error);
-        writeFailures.push({
-          leadId: lead.leadId,
-          step: "write_commit",
-          error: message,
-        });
-        await recordLeadFailure(lead.leadId, "write_commit", message);
-      }
-
-      processed += 1;
-      if (processed % 20 === 0 || processed === requested) {
-        await heartbeat({
-          updated,
-          writeFailureCount: writeFailures.length,
-        });
+      pendingWrites.push({
+        lead,
+        updates: updates as Record<string, unknown>,
+        transferLead,
+        transferRecord,
+        nextLead: nextLead as LeadDoc,
+      });
+      if (pendingWrites.length >= MAX_LEADS_PER_BATCH) {
+        await commitPreparedWrites(pendingWrites.splice(0, pendingWrites.length));
       }
     }
 
-    for (const candidate of sideEffectCandidates) {
-      if (assignToUid) {
-        try {
-          await syncLeadLinkedTasks({
-            lead: candidate.nextLead,
-            actorUid: input.actor.uid,
-            reassignOpenTasksTo: assignToUid,
-          });
-        } catch (error) {
-          const message = getErrorMessage(error);
-          sideEffectFailures.push({
-            leadId: candidate.leadId,
-            step: "task_sync",
-            error: message,
-          });
-          await recordLeadFailure(candidate.leadId, "task_sync", message);
-        }
-      }
+    await commitPreparedWrites(pendingWrites.splice(0, pendingWrites.length));
 
-      if (input.status || input.followUpAt) {
-        try {
-          await syncLeadWorkflowAutomation({
-            lead: candidate.nextLead,
-            actor: input.actor,
-            status: normalizeLeadStatus(input.status ?? candidate.originalLead.status),
-            followUpDate: input.followUpAt ?? null,
-            remarks: input.remarks?.trim() || summary,
-            stage: input.status
-              ? "Bulk Queue Action"
-              : candidate.originalLead.statusDetail?.currentStage ?? null,
-            reason: input.status
-              ? `Moved to ${getLeadStatusLabel(
-                  normalizeLeadStatus(input.status ?? candidate.originalLead.status),
-                )}`
-              : candidate.originalLead.statusDetail?.currentReason ?? null,
-            source: "crm_status_automation",
-          });
-        } catch (error) {
-          const message = getErrorMessage(error);
-          sideEffectFailures.push({
-            leadId: candidate.leadId,
-            step: "workflow_sync",
-            error: message,
-          });
-          await recordLeadFailure(candidate.leadId, "workflow_sync", message);
-        }
-      }
+    for (const candidateGroup of chunkValues(sideEffectCandidates, 10)) {
+      await Promise.all(
+        candidateGroup.map(async (candidate) => {
+          if (assignToUid) {
+            try {
+              await syncLeadLinkedTasks({
+                lead: candidate.nextLead,
+                actorUid: input.actor.uid,
+                reassignOpenTasksTo: assignToUid,
+              });
+            } catch (error) {
+              const message = getErrorMessage(error);
+              sideEffectFailures.push({
+                leadId: candidate.leadId,
+                step: "task_sync",
+                error: message,
+              });
+              await recordLeadFailure(candidate.leadId, "task_sync", message);
+            }
+          }
+
+          if (input.status || input.followUpAt) {
+            try {
+              await syncLeadWorkflowAutomation({
+                lead: candidate.nextLead,
+                actor: input.actor,
+                status: normalizeLeadStatus(input.status ?? candidate.originalLead.status),
+                followUpDate: input.followUpAt ?? null,
+                remarks: input.remarks?.trim() || summary,
+                stage: input.status
+                  ? "Bulk Queue Action"
+                  : candidate.originalLead.statusDetail?.currentStage ?? null,
+                reason: input.status
+                  ? `Moved to ${getLeadStatusLabel(
+                      normalizeLeadStatus(input.status ?? candidate.originalLead.status),
+                    )}`
+                  : candidate.originalLead.statusDetail?.currentReason ?? null,
+                source: "crm_status_automation",
+              });
+            } catch (error) {
+              const message = getErrorMessage(error);
+              sideEffectFailures.push({
+                leadId: candidate.leadId,
+                step: "workflow_sync",
+                error: message,
+              });
+              await recordLeadFailure(candidate.leadId, "workflow_sync", message);
+            }
+          }
+        }),
+      );
+      await flushHeartbeat();
     }
 
     await setDoc(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   deleteDoc,
@@ -504,6 +504,7 @@ export function CrmWorkbench({
   const [batchFilterOpen, setBatchFilterOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [smartViewsOpen, setSmartViewsOpen] = useState(false);
+  const [duplicateReviewOpen, setDuplicateReviewOpen] = useState(false);
   const [quickActionSavingLeadId, setQuickActionSavingLeadId] = useState<string | null>(null);
   const [quickActionMessage, setQuickActionMessage] = useState<string | null>(null);
   const [queuePageSize, setQueuePageSize] = useState(25);
@@ -720,15 +721,22 @@ export function CrmWorkbench({
   const scopeLabel = getWorkbenchScopeLabel(currentUser, scopeUids);
   const actionableNow = counts.new_leads + counts.due_today + counts.callbacks;
   const smartViewRail = smartViews.filter((view) => view.pinned || view.isDefault || view.visibility === "team_shared");
-  const duplicateQueueLeads = useMemo(
-    () => applyWorkbenchFilters(leads, { ...filters, status: "all" }, clock),
-    [clock, filters, leads],
-  );
-  const duplicateGroups = useMemo(
-    () => buildDuplicateLeadGroups(duplicateQueueLeads).slice(0, 8),
-    [duplicateQueueLeads],
-  );
   const canReviewDuplicates = canManageTeam(currentUser) || crmLayout.showLeadInspector;
+  const duplicateQueueLeads = useMemo(
+    () =>
+      canReviewDuplicates && duplicateReviewOpen
+        ? applyWorkbenchFilters(leads, { ...filters, status: "all" }, clock)
+        : [],
+    [canReviewDuplicates, clock, duplicateReviewOpen, filters, leads],
+  );
+  const deferredDuplicateQueueLeads = useDeferredValue(duplicateQueueLeads);
+  const duplicateGroups = useMemo(
+    () =>
+      canReviewDuplicates && duplicateReviewOpen
+        ? buildDuplicateLeadGroups(deferredDuplicateQueueLeads).slice(0, 8)
+        : [],
+    [canReviewDuplicates, deferredDuplicateQueueLeads, duplicateReviewOpen],
+  );
   const activeDuplicateGroup = useMemo(
     () => duplicateGroups.find((group) => group.id === activeDuplicateGroupId) ?? null,
     [activeDuplicateGroupId, duplicateGroups],
@@ -757,6 +765,11 @@ export function CrmWorkbench({
     setMergeStrategy("recent_non_empty");
     setMergeError(null);
   }, [activeDuplicateGroup]);
+
+  useEffect(() => {
+    if (duplicateReviewOpen) return;
+    setActiveDuplicateGroupId(null);
+  }, [duplicateReviewOpen]);
 
   const ownerOptions = useMemo(() => {
     const ownerIds = scopeUids === null
@@ -2240,15 +2253,30 @@ export function CrmWorkbench({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-900">Duplicate Review Queue</div>
-                <div className="text-xs text-slate-500">Review likely duplicate leads inside this CRM scope before they waste BDA effort.</div>
+                <div className="text-xs text-slate-500">Load this queue on demand so duplicate detection does not slow down the main CRM workbench.</div>
               </div>
-              <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                {duplicateGroups.length} live group{duplicateGroups.length === 1 ? "" : "s"}
+              <div className="flex items-center gap-2">
+                {duplicateReviewOpen ? (
+                  <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                    {duplicateGroups.length} live group{duplicateGroups.length === 1 ? "" : "s"}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setDuplicateReviewOpen((current) => !current)}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {duplicateReviewOpen ? "Hide queue" : "Load queue"}
+                </button>
               </div>
             </div>
           </div>
           <div className="px-4 py-4 sm:px-6">
-            {duplicateGroups.length === 0 ? (
+            {!duplicateReviewOpen ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                Duplicate detection stays idle until you open this queue.
+              </div>
+            ) : duplicateGroups.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
                 No duplicate groups are currently visible in this scope.
               </div>
