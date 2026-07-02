@@ -5,20 +5,25 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { RoleBadge } from "@/components/RoleBadge";
+import { formatDateToYYYYMMDD, isBirthdayToday } from "@/lib/birthdays";
 
 export default function ProfilePage() {
   const { userDoc, firebaseUser, updateMyProfile, signOut } = useAuth();
   const router = useRouter();
   const [displayName, setDisplayName] = useState(userDoc?.displayName ?? "");
   const [phone, setPhone] = useState(userDoc?.phone ?? "");
+  const [dateOfBirth, setDateOfBirth] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const companyName = process.env.NEXT_PUBLIC_COMPANY_NAME?.trim() || "People CRM";
+  const showBirthdayGreeting = isBirthdayToday(userDoc);
 
   useEffect(() => {
     setDisplayName(userDoc?.displayName ?? "");
     setPhone(userDoc?.phone ?? "");
-  }, [userDoc?.displayName, userDoc?.phone]);
+    setDateOfBirth(userDoc?.dateOfBirth ? formatDateToYYYYMMDD(userDoc.dateOfBirth) : "");
+  }, [userDoc?.displayName, userDoc?.phone, userDoc?.dateOfBirth]);
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +34,7 @@ export default function ProfilePage() {
       await updateMyProfile({
         displayName: displayName.trim(),
         phone: phone.trim(),
+        dateOfBirth,
       });
       setSaved(true);
     } catch (err) {
@@ -42,6 +48,14 @@ export default function ProfilePage() {
     <div>
       <div className="text-xs font-medium text-slate-500">My Account</div>
       <h1 className="mt-1 text-xl font-semibold tracking-tight">Profile</h1>
+
+      {showBirthdayGreeting ? (
+        <div className="mt-6 rounded-xl border border-pink-200 bg-pink-50 px-5 py-4 text-slate-900 shadow-sm">
+          <div className="text-xs font-semibold uppercase tracking-wide text-pink-700">Happy Birthday</div>
+          <div className="mt-1 text-lg font-semibold">Happy Birthday, {displayName || userDoc?.displayName || "there"}!</div>
+          <div className="mt-1 text-sm text-slate-700">Everyone at {companyName} wishes you a wonderful day.</div>
+        </div>
+      ) : null}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div className="grid gap-2 sm:grid-cols-4">
@@ -104,6 +118,15 @@ export default function ProfilePage() {
               onChange={(e) => setPhone(e.target.value)}
               className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none ring-indigo-500/20 focus:ring-4"
               placeholder="(optional)"
+            />
+          </label>
+          <label className="block">
+            <div className="text-xs font-medium text-slate-600">Date of birth</div>
+            <input
+              type="date"
+              value={dateOfBirth}
+              onChange={(e) => setDateOfBirth(e.target.value)}
+              className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none ring-indigo-500/20 focus:ring-4"
             />
           </label>
 

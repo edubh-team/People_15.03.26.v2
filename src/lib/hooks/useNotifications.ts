@@ -12,6 +12,15 @@ export type NotificationDoc = {
   read: boolean;
   createdAt: unknown;
   relatedTaskId?: string;
+  relatedUserUid?: string;
+  relatedUserName?: string | null;
+  relatedUserDepartment?: string | null;
+  birthdayDateKey?: string;
+  birthdayDisplayDate?: string;
+  birthdayIsoDate?: string;
+  daysUntilBirthday?: number;
+  source?: string;
+  type?: "birthday_today" | "birthday_upcoming" | string;
   priority?: "high" | "medium" | "low";
 };
 

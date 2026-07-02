@@ -23,6 +23,7 @@ import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "fire
 import { updateProfile } from "firebase/auth";
 import type { UserDoc } from "@/lib/types/user";
 import { serverTimestamp } from "firebase/firestore";
+import { formatDateToYYYYMMDD, isBirthdayToday } from "@/lib/birthdays";
 
 type TaskDoc = {
   id: string;
@@ -52,10 +53,11 @@ export default function ProfileUidPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"Personal" | "Work" | "Job" | "Leave" | "Performance" | "Permissions">("Personal");
   const [dirty, setDirty] = useState(false);
-  const [form, setForm] = useState<{ address: string; alternateEmail: string; alternatePhone: string }>({
+  const [form, setForm] = useState<{ address: string; alternateEmail: string; alternatePhone: string; dateOfBirth: string }>({
     address: "",
     alternateEmail: "",
     alternatePhone: "",
+    dateOfBirth: "",
   });
   const [isSaving, setIsSaving] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -72,6 +74,8 @@ export default function ProfileUidPage() {
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const companyName = process.env.NEXT_PUBLIC_COMPANY_NAME?.trim() || "People CRM";
+  const showBirthdayGreeting = isBirthdayToday(targetUser);
 
   useEffect(() => {
     if (toast) {
@@ -137,6 +141,7 @@ export default function ProfileUidPage() {
             address: (targetUser.address ?? targetUser.kycDetails?.address ?? "") || "",
             alternateEmail: targetUser.alternateEmail ?? "",
             alternatePhone: targetUser.alternatePhone ?? "",
+            dateOfBirth: targetUser.dateOfBirth ? formatDateToYYYYMMDD(targetUser.dateOfBirth) : "",
          };
        });
     }
@@ -154,7 +159,8 @@ export default function ProfileUidPage() {
     const nextDirty =
       (targetUser.address ?? "") !== form.address ||
       (targetUser.alternateEmail ?? "") !== form.alternateEmail ||
-      (targetUser.alternatePhone ?? "") !== form.alternatePhone;
+      (targetUser.alternatePhone ?? "") !== form.alternatePhone ||
+      (targetUser.dateOfBirth ? formatDateToYYYYMMDD(targetUser.dateOfBirth) : "") !== form.dateOfBirth;
     setDirty(nextDirty);
   }, [form, targetUser]);
 
@@ -270,6 +276,7 @@ export default function ProfileUidPage() {
         address: form.address || null,
         alternateEmail: form.alternateEmail || null,
         alternatePhone: form.alternatePhone || null,
+        dateOfBirth: form.dateOfBirth || null,
       });
       await refreshUserDoc();
       const snap = await getDoc(ref);
@@ -539,6 +546,13 @@ export default function ProfileUidPage() {
                 {targetUser?.status === "active" ? "Active" : "Inactive"}
               </div>
             </div>
+            {showBirthdayGreeting ? (
+              <div className="mt-4 rounded-xl border border-pink-200 bg-pink-50 px-4 py-3 text-sm text-slate-800">
+                <div className="text-xs font-semibold uppercase tracking-wide text-pink-700">Happy Birthday</div>
+                <div className="mt-1 font-semibold">Happy Birthday, {targetUser?.displayName ?? "there"}!</div>
+                <div className="mt-1 text-slate-700">Everyone at {companyName} wishes you a wonderful day.</div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -753,12 +767,22 @@ export default function ProfileUidPage() {
             </div>
           ))}
         </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
           <label className="block">
             <div className="text-xs font-medium text-slate-600">Address</div>
             <input
               value={form.address}
               onChange={(e) => setForm((v) => ({ ...v, address: e.target.value }))}
+              disabled={!canEditPersonal}
+              className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none ring-indigo-500/20 focus:ring-4 disabled:opacity-60"
+            />
+          </label>
+          <label className="block">
+            <div className="text-xs font-medium text-slate-600">Date of Birth</div>
+            <input
+              type="date"
+              value={form.dateOfBirth}
+              onChange={(e) => setForm((v) => ({ ...v, dateOfBirth: e.target.value }))}
               disabled={!canEditPersonal}
               className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none ring-indigo-500/20 focus:ring-4 disabled:opacity-60"
             />

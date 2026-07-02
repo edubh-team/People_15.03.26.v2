@@ -131,6 +131,8 @@ export async function ensureUserDoc(user: User) {
       ? new Date(user.metadata.lastSignInTime)
       : serverTimestamp();
 
+  const detectedTimezone = (typeof window !== "undefined" && window.Intl) ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+
   if (existing) {
     const patch: Partial<UserDoc> = {
       email: normalizedEmail ?? existing.email,
@@ -140,6 +142,7 @@ export async function ensureUserDoc(user: User) {
       authProvider,
       googleId: authProvider === "google" ? (googleId ?? existing.googleId ?? null) : null,
       lastLogin,
+      timezone: detectedTimezone || existing.timezone || "Asia/Kolkata",
     };
     await updateUserDoc(user.uid, patch);
     const updated = {
@@ -177,6 +180,7 @@ export async function ensureUserDoc(user: User) {
     actingOrgRole: null,
     actingRoleUntil: null,
     lastLogin,
+    timezone: detectedTimezone || "Asia/Kolkata",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
