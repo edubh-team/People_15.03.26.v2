@@ -879,6 +879,11 @@ service cloud.firestore {
       allow create: if request.auth != null;
     }
 
+    match /birthdayWishLogs/{logId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
     match /crm_bulk_actions/{batchId} {
       allow read: if request.auth != null && (
         isSuperAdmin() ||

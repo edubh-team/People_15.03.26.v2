@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import MainLogo from "@/assets/img/main.png";
 import LeadDetailPanel from "@/components/leads/LeadDetailPanel";
+import { BirthdayFloatingBell } from "@/components/crm/BirthdayFloatingBell";
 import {
   getDisplayRole,
   getPrimaryRole,
@@ -33,6 +34,7 @@ import { getCrmScopeUids } from "@/lib/crm/access";
 import { getRoleKnowledgeGuide } from "@/lib/knowledge-center/content";
 import { searchCrmLeads } from "@/lib/crm/search";
 import { useScopedUsers } from "@/lib/hooks/useScopedUsers";
+import { useUsers } from "@/lib/hooks/useUsers";
 import { useIdentityScopeUids } from "@/lib/hooks/useIdentityScopeUids";
 import {
   getRoleLayoutProfile,
@@ -60,6 +62,8 @@ const RECENT_ROUTES_LIMIT = 5;
 const KNOWN_ROUTE_LABELS: Record<string, string> = {
   "/my-day": "My Day",
   "/knowledge-center": "Knowledge Center",
+  "/announcements": "Announcements",
+  "/marketing-automation": "Marketing Automation",
   "/crm/leads": "CRM Leads",
   "/crm/meetings": "Upcoming Meetings",
   "/crm/meetings/create": "Create Meeting",
@@ -398,6 +402,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [selectedBirthdayNotification, setSelectedBirthdayNotification] = useState<NotificationDoc | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [scrolled, setScrolled] = useState(false);
@@ -407,6 +412,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { count: unreadNotificationsCount, notifications } = useMyUnreadNotifications(
     firebaseUser?.uid,
   );
+  const birthdayUsersQuery = useUsers({ maxResults: 1000, onlyActive: true, sortByName: true });
   const presenceQuery = useMyPresence(firebaseUser?.uid ?? null);
   const todayKey = useMemo(() => getTodayKey(), []);
   const layoutProfile = useMemo(() => getRoleLayoutProfile(userDoc), [userDoc]);
@@ -466,6 +472,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch (e) {
         console.error("Failed to mark notification as read", e);
     }
+  }
+
+  function isBirthdayNotification(n: NotificationDoc) {
+      return n.type === "birthday_today" || n.type === "birthday_upcoming" || n.source === "birthday_wishes_cron" || n.source === "birthday_reminders_cron";
+  }
+
+  async function openBirthdayNotification(n: NotificationDoc) {
+      await markAsRead(n.id);
+      setSelectedBirthdayNotification(n);
+      setNotificationsOpen(false);
   }
 
   async function handleNotificationAction(n: NotificationDoc, action: "view" | "accept") {
@@ -1945,12 +1961,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         No notifications yet.
                       </div>
                     ) : (
-                      notifications.map((n) => (
+                      notifications.map((n) => {
+                        const birthdayNotification = isBirthdayNotification(n);
+                        return (
                         <div key={n.id} className="border-b border-slate-100 bg-white px-3 py-3 last:border-0 hover:bg-slate-50">
                           <div className="flex items-start justify-between gap-2">
-                            <div>
+                            <button
+                              type="button"
+                              onClick={() => birthdayNotification ? void openBirthdayNotification(n) : undefined}
+                              className="min-w-0 flex-1 text-left disabled:cursor-default"
+                              disabled={!birthdayNotification}
+                            >
                               <div className="text-sm font-medium text-slate-900">{n.title}</div>
                               <div className="text-xs text-slate-500 mt-0.5">{n.body}</div>
+                              {birthdayNotification ? (
+                                <div className="mt-2 grid gap-1 rounded-md border border-pink-100 bg-pink-50 px-2 py-2 text-xs text-slate-700">
+                                  <div><span className="font-semibold">Name:</span> {n.relatedUserName ?? "Employee"}</div>
+                                  <div><span className="font-semibold">Department:</span> {n.relatedUserDepartment ?? "General"}</div>
+                                  <div><span className="font-semibold">Date:</span> {n.birthdayDisplayDate ?? n.birthdayDateKey ?? "Birthday"}</div>
+                                </div>
+                              ) : null}
                               {n.priority && (
                                 <span className={`mt-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                                   n.priority === 'high' ? 'bg-rose-100 text-rose-700' : 
@@ -1960,7 +1990,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                   {n.priority.charAt(0).toUpperCase() + n.priority.slice(1)} Priority
                                 </span>
                               )}
-                            </div>
+                            </button>
                             {!n.read && (
                               <button 
                                 onClick={(e) => {
@@ -1972,7 +2002,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                               />
                             )}
                           </div>
-                          {n.relatedTaskId && (
+                          {birthdayNotification ? (
+                            <div className="mt-2">
+                              <button
+                                onClick={() => void openBirthdayNotification(n)}
+                                className="rounded bg-pink-50 px-2 py-1 text-xs font-medium text-pink-700 hover:bg-pink-100"
+                              >
+                                View Birthday
+                              </button>
+                            </div>
+                          ) : n.relatedTaskId && (
                             <div className="mt-2 flex gap-2">
                               <button
                                 onClick={() => handleNotificationAction(n, 'view')}
@@ -1989,13 +2028,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             </div>
                           )}
                         </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
               ) : null}
             </div>
 
+            {selectedBirthdayNotification ? (
+              <div className="fixed right-4 top-16 z-[80] w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-pink-200 bg-white shadow-xl">
+                <div className="border-b border-pink-100 bg-pink-50 px-4 py-3">
+                  <div className="text-sm font-semibold text-slate-900">Birthday notification</div>
+                  <div className="mt-0.5 text-xs text-slate-600">Automated reminder</div>
+                </div>
+                <div className="grid gap-2 px-4 py-4 text-sm text-slate-700">
+                  <div><span className="font-semibold text-slate-900">Name:</span> {selectedBirthdayNotification.relatedUserName ?? "Employee"}</div>
+                  <div><span className="font-semibold text-slate-900">Department:</span> {selectedBirthdayNotification.relatedUserDepartment ?? "General"}</div>
+                  <div><span className="font-semibold text-slate-900">Date:</span> {selectedBirthdayNotification.birthdayDisplayDate ?? selectedBirthdayNotification.birthdayDateKey ?? "Birthday"}</div>
+                  {typeof selectedBirthdayNotification.daysUntilBirthday === "number" ? (
+                    <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      {selectedBirthdayNotification.daysUntilBirthday === 0
+                        ? "Birthday is today."
+                        : `Birthday is in ${selectedBirthdayNotification.daysUntilBirthday} day${selectedBirthdayNotification.daysUntilBirthday === 1 ? "" : "s"}.`}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex justify-end border-t border-slate-100 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBirthdayNotification(null)}
+                    className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="relative" ref={profileMenuRef}>
               <button
                 type="button"
@@ -2290,6 +2359,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
 
+        <BirthdayFloatingBell users={birthdayUsersQuery.data ?? []} loading={birthdayUsersQuery.isLoading} />
+
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-2 backdrop-blur md:hidden">
           <div className="mx-auto grid max-w-md grid-cols-4 gap-2">
             <Link
@@ -2345,4 +2416,5 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 

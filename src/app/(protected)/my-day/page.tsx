@@ -16,6 +16,7 @@ import RoleDashboardsPanel from "@/components/my-day/RoleDashboardsPanel";
 import { MeetingsDashboardWidgets } from "@/components/meetings/MeetingsDashboardWidgets";
 import DirectSaleForm from "@/components/leads/DirectSaleForm";
 import { CANONICAL_DOMAIN_ROUTES } from "@/lib/routes/canonical";
+import { isBirthdayToday } from "@/lib/birthdays";
 import {
   canAccessCrm,
   getCrmScopeUids,
@@ -327,6 +328,8 @@ export default function MyDayPage() {
   const canOpenDirectSale = canPunchNewSale(userDoc);
   const roleLabel = formatRoleLabel(userDoc?.orgRole ?? userDoc?.role);
   const primaryRole = getPrimaryRole(userDoc);
+  const companyName = process.env.NEXT_PUBLIC_COMPANY_NAME?.trim() || "People CRM";
+  const showBirthdayGreeting = isBirthdayToday(userDoc);
   const showHrQueues = isHrUser(userDoc);
   const showFinanceQueues = canAccessFinance(userDoc);
   const [showDirectSaleModal, setShowDirectSaleModal] = useState(false);
@@ -1053,6 +1056,13 @@ export default function MyDayPage() {
                 Role: {formatRoleLabel(primaryRole)}
               </div>
             </div>
+            {showBirthdayGreeting ? (
+              <div className="mt-5 rounded-xl border border-pink-200 bg-pink-50 px-5 py-4 text-slate-900">
+                <div className="text-xs font-semibold uppercase tracking-wide text-pink-700">Happy Birthday</div>
+                <div className="mt-1 text-lg font-semibold">Happy Birthday, {userDoc?.displayName || userDoc?.email || "there"}!</div>
+                <div className="mt-1 text-sm text-slate-700">Everyone at {companyName} wishes you a wonderful day.</div>
+              </div>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-2">
               {canOpenDirectSale ? (
                 <button

@@ -38,8 +38,9 @@ export function EmployeeLeadsView({
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] px-4 py-8 text-slate-900 sm:px-6">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-7xl space-y-6">
         <CrmSurfaceRail activeSurface={activeSurface} />
+        
         <CrmWorkbench
           currentUser={userDoc}
           scopeUids={identityScopeUids.length > 0 ? identityScopeUids : [userDoc.uid]}

@@ -79,6 +79,10 @@ export type UserDoc = {
   displayName: string | null;
   designation?: string | null;
   department?: string | null;
+  dateOfBirth?: string | null;
+  dob?: unknown;
+  birthDate?: unknown;
+  birthday?: unknown;
   joiningDate?: unknown;
   salary?: number | null;
   photoURL?: string | null;
@@ -206,6 +210,7 @@ export type UserDoc = {
     encryptedPrivateKey?: string; // Optional: Encrypted backup for cross-device
   };
   lastLogin?: unknown;
+  timezone?: string | null;
   createdAt: unknown;
   updatedAt: unknown;
 };

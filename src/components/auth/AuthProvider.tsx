@@ -39,6 +39,7 @@ type AuthState = {
   updateMyProfile: (input: {
     displayName?: string;
     phone?: string;
+    dateOfBirth?: string;
   }) => Promise<void>;
 };
 
@@ -264,7 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const next = await getUserDoc(firebaseUser.uid);
         setUserDoc(next);
       },
-      async updateMyProfile(input: { displayName?: string; phone?: string }) {
+      async updateMyProfile(input: { displayName?: string; phone?: string; dateOfBirth?: string }) {
         if (!auth) throw new Error("Firebase is not configured");
         if (!firebaseUser) throw new Error("Not signed in");
 
@@ -278,6 +279,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             : {}),
           ...(typeof input.phone !== "undefined"
             ? { phone: input.phone || null }
+            : {}),
+          ...(typeof input.dateOfBirth !== "undefined"
+            ? { dateOfBirth: input.dateOfBirth || null }
             : {}),
         });
 
