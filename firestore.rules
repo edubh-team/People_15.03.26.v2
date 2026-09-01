@@ -315,7 +315,6 @@ service cloud.firestore {
         (isManagerOrAbove() && reportsTo(uid))
       );
     }
-
     match /leads/{leadId} {
       allow read: if isSuperAdmin() || 
                   (request.auth != null && (
@@ -883,7 +882,6 @@ service cloud.firestore {
       allow read: if isSuperAdmin() || isAdmin();
       allow write: if false;
     }
-
     match /crm_bulk_actions/{batchId} {
       allow read: if request.auth != null && (
         isSuperAdmin() ||
@@ -1107,3 +1105,4 @@ service cloud.firestore {
     }
   }
 }
+

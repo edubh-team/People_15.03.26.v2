@@ -46,6 +46,14 @@ export type ChannelDoc = {
   updatedAt: Timestamp;
 };
 
+export function sortChannelsByUpdatedAt(channels: ChannelDoc[]): ChannelDoc[] {
+  return [...channels].sort((left, right) => {
+    const leftMillis = left.updatedAt?.toMillis?.() ?? 0;
+    const rightMillis = right.updatedAt?.toMillis?.() ?? 0;
+    return rightMillis - leftMillis;
+  });
+}
+
 export function useChannels() {
   const { firebaseUser } = useAuth();
   const [channels, setChannels] = useState<ChannelDoc[]>([]);
@@ -59,13 +67,12 @@ export function useChannels() {
 
     const q = query(
       collection(db, "channels"),
-      where("participants", "array-contains", firebaseUser.uid),
-      orderBy("updatedAt", "desc")
+      where("participants", "array-contains", firebaseUser.uid)
     );
 
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChannelDoc));
-      setChannels(list);
+      setChannels(sortChannelsByUpdatedAt(list));
       setLoading(false);
     }, (err) => {
         console.error("Error fetching channels:", err);

@@ -52,6 +52,7 @@ export type CrmWorkbenchFilters = {
   importBatchId?: string | "all";
   activityState?: CrmWorkbenchActivityStateFilter;
   activityType?: CrmWorkbenchActivityTypeFilter;
+  externalSystem?: string | "all";
   source?: string | "all";
   campaignName?: string | "all";
   leadTag?: string | "all";
@@ -89,6 +90,7 @@ const DEFAULT_WORKBENCH_FILTERS: CrmWorkbenchFilters = {
   importBatchId: "all",
   activityState: "all",
   activityType: "all",
+  externalSystem: "all",
   source: "all",
   campaignName: "all",
   leadTag: "all",
@@ -311,6 +313,7 @@ export function matchesWorkbenchSearch(lead: LeadDoc, rawTerm: string) {
     lead.source,
     lead.campaignName,
     lead.importBatchId,
+    lead.importBatchName,
     ...(lead.importTags ?? []),
     ...(lead.leadTags ?? []),
     lead.statusDetail?.currentReason,
@@ -419,6 +422,7 @@ export function normalizeWorkbenchFilters(
     importBatchId,
     activityState,
     activityType,
+    externalSystem: normalizeTextFilter(filters?.externalSystem),
     source: normalizeTextFilter(filters?.source),
     campaignName: normalizeTextFilter(filters?.campaignName),
     leadTag: normalizeTextFilter(filters?.leadTag),
@@ -647,6 +651,15 @@ export function applyWorkbenchFilters(
       if (filters.activityType === "none") {
         if (lead.lastActivityType) return false;
       } else if (lead.lastActivityType !== filters.activityType) {
+        return false;
+      }
+    }
+
+    if (filters.externalSystem && filters.externalSystem !== "all") {
+      if (
+        normalizeComparable(lead.externalSystem) !==
+        normalizeComparable(filters.externalSystem)
+      ) {
         return false;
       }
     }

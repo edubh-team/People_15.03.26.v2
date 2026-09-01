@@ -172,7 +172,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("assignedTo", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -181,7 +180,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("ownerUid", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -190,7 +188,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("closedBy.uid", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -1428,4 +1425,3 @@ export default function MyDayPage() {
     </AuthGate>
   );
 }
-

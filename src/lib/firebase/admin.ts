@@ -6,15 +6,47 @@ import type { Firestore } from "firebase-admin/firestore";
 import type { Auth } from "firebase-admin/auth";
 
 // Helper to get environment variables safely
+const parseServiceAccountJson = (value: string, source: string): ServiceAccount => {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const projectId = parsed.project_id ?? parsed.projectId;
+    const clientEmail = parsed.client_email ?? parsed.clientEmail;
+    const privateKey = parsed.private_key ?? parsed.privateKey;
+
+    if (
+      typeof projectId !== "string" ||
+      typeof clientEmail !== "string" ||
+      typeof privateKey !== "string"
+    ) {
+      throw new Error("missing project_id, client_email, or private_key");
+    }
+
+    return {
+      projectId,
+      clientEmail: clientEmail.trim(),
+      privateKey: privateKey.replace(/\\n/g, "\n"),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${source}: ${message}`);
+  }
+};
+
 const getServiceAccount = (): ServiceAccount | null => {
+  // Preferred for Docker/.env deployments because base64 survives shell parsing
+  // without corrupting the private key's quotes or newlines.
+  const encodedServiceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY_BASE64?.trim();
+  if (encodedServiceAccountKey) {
+    return parseServiceAccountJson(
+      Buffer.from(encodedServiceAccountKey, "base64").toString("utf8"),
+      "FIREBASE_SERVICE_ACCOUNT_KEY_BASE64",
+    );
+  }
+
   // Option 1: Full JSON in one env var (common in some CI/CD)
   const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (serviceAccountKey) {
-      try {
-          return JSON.parse(serviceAccountKey);
-      } catch (e) {
-          console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", e);
-      }
+    return parseServiceAccountJson(serviceAccountKey, "FIREBASE_SERVICE_ACCOUNT_KEY");
   }
   
   // Option 2: Individual variables (common in Vercel)
@@ -36,6 +68,10 @@ const getServiceAccount = (): ServiceAccount | null => {
   }
 
   if (projectId && clientEmail && privateKey) {
+    if (!privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+        !privateKey.includes("-----END PRIVATE KEY-----")) {
+      throw new Error("FIREBASE_PRIVATE_KEY is malformed");
+    }
     // Check for project ID mismatch in configuration
     if (clientEmail.includes("iam.gserviceaccount.com")) {
         // extract project id from email: service-account@project-id.iam.gserviceaccount.com
@@ -113,4 +149,3 @@ export async function getAdmin() {
     throw error;
   }
 }
-

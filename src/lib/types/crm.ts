@@ -143,6 +143,8 @@ export type LeadStatusDetail = {
 
 export type LeadDoc = {
   leadId: string;
+  externalLeadId?: string | null;
+  externalSystem?: string | null;
   name: string;
   phone: string | null;
   email: string | null;
@@ -154,6 +156,9 @@ export type LeadDoc = {
   targetUniversity: string | null;
   leadLocation?: string | null;
   preferredLanguage?: string | null;
+  preferredSession?: string | null;
+  customPreferredSession?: string | null;
+  lastPassingPercentage?: string | null;
   courseFees: number | null;
   remarks?: string;
   status: LeadStatus;
@@ -204,7 +209,10 @@ export type LeadDoc = {
   source?: string;
   sourceNormalized?: string | null;
   campaignName?: string | null;
+  utmAttribution?: Record<string, unknown> | null;
+  submittedAt?: unknown;
   importBatchId?: string | null;
+  importBatchName?: string | null;
   importTags?: string[] | null;
   importTagsNormalized?: string[] | null;
   importFileName?: string | null;

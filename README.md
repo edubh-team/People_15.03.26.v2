@@ -16,6 +16,9 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
   - `FINANCE_DELETE_REQUIRES_APPROVAL`: keeps ledger deletions in the approval queue when enabled
   - `APP_ENV`: server-side environment label used in deploy discipline and audit logs
   - `NEXT_PUBLIC_APP_ENV`: optional build-time environment label for client-visible separation
+  - `EDUBH_PEOPLE_INTEGRATION_SECRET`: server-only HMAC secret shared with `edubh.com` for lead ingestion
+  - `EDUBH_PEOPLE_PULL_SECRET`: must match the EduBH website's `CRON_SECRET`; authorizes manager-triggered lead fetches
+  - `EDUBH_PEOPLE_PULL_ENDPOINT`: optional EduBH delivery endpoint, defaults to `https://edubh.com/api/cron/people-lead-delivery`
 - Regression and migration commands:
   - `npm run test:rules`: runs Firestore rules regression tests against the local emulator
   - `npm run migrate:tasks -- --apply`: backfills task assignee identity fields and syncs linked lead metadata (`leadName`, `leadStatus`, `leadOwnerUid`)
@@ -30,6 +33,8 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
   - `/crm/leads` now includes a duplicate review queue and merge console that marks merged leads safely instead of deleting them
   - the CRM lead drawer now includes a communication center with reusable WhatsApp/email templates, quick call outcomes, and next-best-action prompts
   - `/team` now supports bulk queue actions for assignment, follow-up rescheduling, status shifts, and campaign/source tagging with audit-safe history
+  - `POST /api/integrations/edubh/leads`: receives signed, idempotent website applications and creates unassigned CRM leads for manager distribution
+  - `POST /api/integrations/edubh/pull`: lets authorized managers fetch pending EduBH applications into Fresh Queue
 
 ## Getting Started
 

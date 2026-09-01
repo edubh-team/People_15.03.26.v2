@@ -259,3 +259,4 @@ export function formatRoleLabel(value?: string | null) {
 export function getDisplayRole(user: RoleSource) {
   return formatRoleLabel(user?.orgRole ?? user?.role ?? "Employee");
 }
+

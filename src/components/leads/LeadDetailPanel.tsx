@@ -1871,8 +1871,8 @@ export default function LeadDetailPanel({
                                 </div>
                               ) : (
                                 <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
-                                  {filteredTransferHistoryRows.map((entry) => (
-                                    <article key={entry.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+                                  {filteredTransferHistoryRows.map((entry, index) => (
+                                    <article key={`${entry.id}-${index}`} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
                                       <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="font-semibold uppercase tracking-wide text-slate-700">
                                           {entry.custodyState.replace("_", " ")}

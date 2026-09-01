@@ -48,6 +48,7 @@ type ImportBatchStatus = "processing" | "completed" | "failed";
 
 type ImportBatchRow = {
   id: string;
+  batchName: string | null;
   fileName: string | null;
   sourceTag: string | null;
   tags: string[];
@@ -124,6 +125,7 @@ function formatDateLabel(value: unknown) {
 function normalizeBatchRow(id: string, data: DocumentData): ImportBatchRow {
   return {
     id,
+    batchName: typeof data.batchName === "string" ? data.batchName : null,
     fileName: typeof data.fileName === "string" ? data.fileName : null,
     sourceTag: typeof data.sourceTag === "string" ? data.sourceTag : null,
     tags: toStringArray(data.tags),
@@ -153,6 +155,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [sourceTag, setSourceTag] = useState("");
+  const [batchName, setBatchName] = useState("");
   const [batchTagsInput, setBatchTagsInput] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [recentBatches, setRecentBatches] = useState<ImportBatchRow[]>([]);
@@ -420,9 +423,14 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
   const handleUpload = async () => {
     if (preview.length === 0 || !db) return;
     const normalizedSourceTag = sourceTag.trim();
+    const normalizedBatchName = batchName.trim();
     const normalizedCampaignName = campaignName.trim();
     if (!normalizedSourceTag) {
       setError("Source tag is required before importing leads.");
+      return;
+    }
+    if (!normalizedBatchName) {
+      setError("Batch name is required before importing leads.");
       return;
     }
     if (parsedTags.length === 0) {
@@ -465,6 +473,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
       const normalizedTags = parsedTags.map((tag) => tag.toLowerCase());
       await setDoc(importBatchRef, {
         batchId: importBatchId,
+        batchName: normalizedBatchName,
         fileName: file?.name ?? null,
         sourceTag: normalizedSourceTag,
         campaignName: normalizedCampaignName || null,
@@ -538,6 +547,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
             sourceNormalized: normalizedSourceTag.toLowerCase(),
             campaignName: normalizedCampaignName || null,
             importBatchId,
+            importBatchName: normalizedBatchName,
             importTags: parsedTags,
             importTagsNormalized: normalizedTags,
             leadTags: mergedLeadTags.length > 0 ? mergedLeadTags : null,
@@ -577,6 +587,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
               sourceTag: normalizedSourceTag,
               campaignName: normalizedCampaignName || null,
               importBatchId,
+              importBatchName: normalizedBatchName,
               importTags: parsedTags,
               contextualTags: contextualLeadTags,
               leadLocation: lead.leadLocation ?? null,
@@ -673,6 +684,7 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
     preview.length > 0 &&
     importSummary.willImport > 0 &&
     sourceTag.trim().length > 0 &&
+    batchName.trim().length > 0 &&
     parsedTags.length > 0;
 
   if (!isOpen) return null;
@@ -698,7 +710,19 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
             <div className="mt-1 text-xs text-slate-500">
               Add source and tags now so this upload can be searched and tracked as one batch.
             </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Batch Name *
+                </span>
+                <input
+                  type="text"
+                  value={batchName}
+                  onChange={(event) => setBatchName(event.target.value)}
+                  placeholder="Example: September MBA Leads"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-indigo-500"
+                />
+              </label>
               <label className="block">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Source Tag *
@@ -784,7 +808,8 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
                               {batchRow.fileName ?? "Spreadsheet import"}
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-                              <span>{batchRow.sourceTag ?? "-"}</span>
+                              <span>{batchRow.batchName ?? batchRow.sourceTag ?? "Unnamed batch"}</span>
+                              {batchRow.batchName && batchRow.sourceTag ? <span>{batchRow.sourceTag}</span> : null}
                               <span>{batchRow.importedRows}/{batchRow.eligibleRows || batchRow.totalRows} imported</span>
                               <span>{formatDateLabel(batchRow.updatedAt || batchRow.createdAt)}</span>
                             </div>
@@ -1067,4 +1092,3 @@ export function LeadImportModal({ isOpen, onClose, onSuccess }: Props) {
     </div>
   );
 }
-

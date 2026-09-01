@@ -426,16 +426,19 @@ export default function ReportsPage() {
       setTemplateRows([]);
       return;
     }
-    const q = query(collection(firestore, "report_templates"), where("ownerUid", "==", userDoc.uid), orderBy("updatedAt", "desc"), limit(25));
+    const q = query(collection(firestore, "report_templates"), where("ownerUid", "==", userDoc.uid));
     return onSnapshot(
       q,
       (snap) => {
         setTemplateRows(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<ReportTemplateDoc, "id">),
-            roleFilter: (d.data() as { roleFilter?: RoleFilter }).roleFilter ?? "all",
-          })),
+          [...snap.docs]
+            .sort((left, right) => toMillis(right.data().updatedAt) - toMillis(left.data().updatedAt))
+            .slice(0, 25)
+            .map((d) => ({
+              id: d.id,
+              ...(d.data() as Omit<ReportTemplateDoc, "id">),
+              roleFilter: (d.data() as { roleFilter?: RoleFilter }).roleFilter ?? "all",
+            })),
         );
       },
       (error) => console.error("Template listener failed", error),
@@ -448,11 +451,16 @@ export default function ReportsPage() {
       setScheduleRows([]);
       return;
     }
-    const q = query(collection(firestore, "report_schedules"), where("ownerUid", "==", userDoc.uid), orderBy("updatedAt", "desc"), limit(25));
+    const q = query(collection(firestore, "report_schedules"), where("ownerUid", "==", userDoc.uid));
     return onSnapshot(
       q,
       (snap) => {
-        setScheduleRows(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ReportScheduleDoc, "id">) })));
+        setScheduleRows(
+          [...snap.docs]
+            .sort((left, right) => toMillis(right.data().updatedAt) - toMillis(left.data().updatedAt))
+            .slice(0, 25)
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<ReportScheduleDoc, "id">) })),
+        );
       },
       (error) => console.error("Schedule listener failed", error),
     );

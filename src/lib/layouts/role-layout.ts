@@ -540,8 +540,8 @@ export function getShellNavigationGroups(
       : (() => {
           const priority =
             options.workspace === "HR"
-              ? ["SUPER", "HR", "FINANCE", "MANAGEMENT", "MEETINGS", "SALES", "WORKDAY", "PERSONAL"]
-              : ["SUPER", "FINANCE", "MANAGEMENT", "MEETINGS", "SALES", "WORKDAY", "PERSONAL", "HR"];
+              ? ["SUPER", "HR", "MARKETING", "FINANCE", "MANAGEMENT", "MEETINGS", "SALES", "WORKDAY", "PERSONAL"]
+              : ["SUPER", "FINANCE", "MANAGEMENT", "MARKETING", "MEETINGS", "SALES", "WORKDAY", "PERSONAL", "HR"];
           const ranking = new Map(priority.map((key, index) => [key, index]));
 
           return [...profile.shellGroups].sort(
@@ -577,3 +577,4 @@ export function getShellNavigationGroups(
 
   return resolvedGroups;
 }
+

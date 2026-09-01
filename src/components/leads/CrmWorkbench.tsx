@@ -18,6 +18,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import {
   ArrowPathIcon,
+  ArrowDownTrayIcon,
   BanknotesIcon,
   BookmarkIcon,
   CalendarDaysIcon,
@@ -31,7 +32,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { canBulkImportLeads, canManageTeam } from "@/lib/access";
 import { getLeadOverdueDays, getLeadSlaBucket } from "@/lib/crm/automation";
-import { db } from "@/lib/firebase/client";
+import { auth, db } from "@/lib/firebase/client";
 import {
   applyWorkbenchFilters,
   buildWorkbenchCountsForFilters,
@@ -159,7 +160,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("assignedTo", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -168,7 +168,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("ownerUid", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -177,7 +176,6 @@ function buildLeadQueries(scopeUids: string[] | null): Array<{ key: string; quer
       query: query(
         collection(firestore, "leads"),
         where("closedBy.uid", "in", part),
-        orderBy("updatedAt", "desc"),
         limit(SCOPED_QUERY_LIMIT),
       ),
     },
@@ -506,6 +504,13 @@ export function CrmWorkbench({
   const [smartViewsOpen, setSmartViewsOpen] = useState(false);
   const [quickActionSavingLeadId, setQuickActionSavingLeadId] = useState<string | null>(null);
   const [quickActionMessage, setQuickActionMessage] = useState<string | null>(null);
+  const [isFetchingEdubh, setIsFetchingEdubh] = useState(false);
+  const [isEdubhFetchOpen, setIsEdubhFetchOpen] = useState(false);
+  const [edubhFromDate, setEdubhFromDate] = useState(() => new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10));
+  const [edubhToDate, setEdubhToDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [edubhBatchName, setEdubhBatchName] = useState("");
+  const [edubhCampaignName, setEdubhCampaignName] = useState("");
+  const [edubhBatchTags, setEdubhBatchTags] = useState("");
   const [queuePageSize, setQueuePageSize] = useState(25);
   const [queuePage, setQueuePage] = useState(1);
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -770,11 +775,11 @@ export function CrmWorkbench({
   );
   const canUseBatchFilter = canBulkImportLeads(currentUser);
   const batchFilterOptions = useMemo(() => {
-    const byBatch = new Map<string, { count: number; source: string | null; updatedAtMs: number }>();
+    const byBatch = new Map<string, { count: number; source: string | null; name: string | null; updatedAtMs: number }>();
     leads.forEach((lead) => {
       const batchId = lead.importBatchId?.trim();
       if (!batchId) return;
-      const current = byBatch.get(batchId) ?? { count: 0, source: null, updatedAtMs: 0 };
+      const current = byBatch.get(batchId) ?? { count: 0, source: null, name: null, updatedAtMs: 0 };
       const updatedAtMs =
         coerceDateValue(lead.updatedAt)?.getTime() ??
         coerceDateValue(lead.createdAt)?.getTime() ??
@@ -782,6 +787,12 @@ export function CrmWorkbench({
       byBatch.set(batchId, {
         count: current.count + 1,
         source: current.source ?? lead.source ?? null,
+        name:
+          current.name ??
+          lead.importBatchName?.trim() ??
+          lead.importTags?.find((tag) => tag?.trim())?.trim() ??
+          lead.importFileName?.trim() ??
+          null,
         updatedAtMs: Math.max(current.updatedAtMs, updatedAtMs),
       });
     });
@@ -790,10 +801,14 @@ export function CrmWorkbench({
       .slice(0, 12)
       .map(([batchId, meta]) => ({
         value: batchId,
-        label: `${batchId.slice(-8)} | ${meta.count}`,
+        label: `${meta.name ?? `Batch ${batchId.slice(-8)}`} | ${meta.count}`,
         source: meta.source,
       }));
   }, [leads]);
+  const selectedBatchOption = useMemo(
+    () => batchFilterOptions.find((option) => option.value === filters.importBatchId) ?? null,
+    [batchFilterOptions, filters.importBatchId],
+  );
   const sourceFilterOptions = useMemo(
     () =>
       ensureCurrentOption(
@@ -1177,6 +1192,71 @@ export function CrmWorkbench({
     }
   }
 
+  async function fetchEdubhLeads() {
+    if (!auth?.currentUser || !canManageTeam(currentUser)) return;
+    const batchName = edubhBatchName.trim();
+    const batchTags = Array.from(
+      new Set(edubhBatchTags.split(",").map((tag) => tag.trim()).filter(Boolean)),
+    );
+    if (!batchName) {
+      setQuickActionMessage("Batch name is required before fetching EduBH leads.");
+      return;
+    }
+    if (batchTags.length === 0) {
+      setQuickActionMessage("Add at least one batch tag before fetching EduBH leads.");
+      return;
+    }
+    setIsFetchingEdubh(true);
+    setQuickActionMessage(null);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch("/api/integrations/edubh/pull", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fromDate: edubhFromDate,
+          toDate: edubhToDate,
+          batchName,
+          sourceTag: "EduBH Website",
+          campaignName: edubhCampaignName.trim() || null,
+          batchTags,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | { delivered?: number; processed?: number; failed?: number; batchId?: string; error?: string }
+        | null;
+      if (!response.ok) throw new Error(result?.error || "Unable to fetch EduBH leads.");
+
+      const delivered = Number(result?.delivered || 0);
+      const failed = Number(result?.failed || 0);
+      setQuickActionMessage(
+        delivered > 0
+          ? `${delivered} EduBH lead${delivered === 1 ? "" : "s"} fetched for ${edubhFromDate} to ${edubhToDate}. Open Fresh Queue to assign them.${failed ? ` ${failed} failed and can be retried.` : ""}`
+          : `No EduBH leads found between ${edubhFromDate} and ${edubhToDate}.`,
+      );
+      setActiveSmartViewId(null);
+      setActiveTab("new_leads");
+      setAdvancedFiltersOpen(true);
+      setFilters((current) =>
+        normalizeWorkbenchFilters({
+          ...current,
+          externalSystem: "edubh.com",
+          importBatchId: result?.batchId || "all",
+          createdFromDateKey: edubhFromDate,
+          createdToDateKey: edubhToDate,
+        }),
+      );
+      setIsEdubhFetchOpen(false);
+    } catch (error) {
+      setQuickActionMessage(error instanceof Error ? error.message : "Unable to fetch EduBH leads.");
+    } finally {
+      setIsFetchingEdubh(false);
+    }
+  }
+
   async function applyBulkAssignFromQueue() {
     if (!canUseBulkAssign) return;
     if (selectedLeads.length === 0) {
@@ -1468,10 +1548,64 @@ export function CrmWorkbench({
                   Import leads
                 </button>
               ) : null}
+              {canManageTeam(currentUser) ? (
+                <button
+                  type="button"
+                  disabled={isFetchingEdubh}
+                  onClick={() => setIsEdubhFetchOpen((current) => !current)}
+                  className="inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ArrowDownTrayIcon className={`mr-2 h-4 w-4 ${isFetchingEdubh ? "animate-bounce" : ""}`} />
+                  {isFetchingEdubh ? "Fetching EduBH..." : "Fetch EduBH leads by date"}
+                </button>
+              ) : null}
               <button type="button" onClick={() => setIsStudioOpen((current) => !current)} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"><BookmarkIcon className="mr-2 h-4 w-4" />{ownedActiveSmartView ? "Edit view" : "Save view"}</button>
               {nextLead ? <button type="button" onClick={() => openLeadDetail({ lead: nextLead, section: crmLayout.defaultSection })} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">Open top lead</button> : null}
             </div>
           </div>
+          {canManageTeam(currentUser) && isEdubhFetchOpen ? (
+            <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <div className="space-y-4">
+                <div>
+                  <div className="text-sm font-semibold text-emerald-900">Fetch EduBH leads by date</div>
+                  <div className="mt-1 text-xs text-emerald-700">Add batch details and choose a range up to 31 days. Existing leads will not be duplicated.</div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">Batch Name *</span>
+                    <input type="text" value={edubhBatchName} onChange={(event) => setEdubhBatchName(event.target.value)} placeholder="Example: September EduBH Leads" className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">Source Tag *</span>
+                    <input type="text" value="EduBH Website" readOnly className="w-full cursor-not-allowed rounded-xl border border-emerald-200 bg-emerald-100/70 px-3 py-2 text-sm text-emerald-900" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">Campaign (Optional)</span>
+                    <input type="text" value={edubhCampaignName} onChange={(event) => setEdubhCampaignName(event.target.value)} placeholder="Example: September Intake" className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">Batch Tags *</span>
+                    <input type="text" value={edubhBatchTags} onChange={(event) => setEdubhBatchTags(event.target.value)} placeholder="Comma separated: website, mba" className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800" />
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">From date</span>
+                    <input type="date" value={edubhFromDate} max={edubhToDate} onChange={(event) => setEdubhFromDate(event.target.value)} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    <span className="mb-1 block">To date</span>
+                    <input type="date" value={edubhToDate} min={edubhFromDate} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setEdubhToDate(event.target.value)} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800" />
+                  </label>
+                  <button type="button" disabled={isFetchingEdubh || !edubhFromDate || !edubhToDate || edubhFromDate > edubhToDate || !edubhBatchName.trim() || !edubhBatchTags.trim()} onClick={() => void fetchEdubhLeads()} className="inline-flex items-center rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60">
+                    <ArrowDownTrayIcon className={`mr-2 h-4 w-4 ${isFetchingEdubh ? "animate-bounce" : ""}`} />
+                    {isFetchingEdubh ? "Fetching..." : "Fetch selected dates"}
+                  </button>
+                  <button type="button" disabled={isFetchingEdubh} onClick={() => setIsEdubhFetchOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {canUseBatchFilter ? (
             <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1479,7 +1613,7 @@ export function CrmWorkbench({
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Batch Filter</div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     {filters.importBatchId && filters.importBatchId !== "all"
-                      ? `Focused on ${filters.importBatchId}`
+                      ? `Focused on ${selectedBatchOption?.label ?? filters.importBatchId}`
                       : "No batch focus applied"}
                   </div>
                 </div>
@@ -1558,6 +1692,20 @@ export function CrmWorkbench({
                   className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                 >
                   {advancedFiltersOpen ? "Hide advanced" : "Show advanced"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdvancedFiltersOpen(true);
+                    setManualFilters({ externalSystem: "edubh.com" });
+                  }}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                    filters.externalSystem === "edubh.com"
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  }`}
+                >
+                  EduBH leads
                 </button>
                 <button
                   type="button"
@@ -1699,6 +1847,17 @@ export function CrmWorkbench({
             </div>
 
             <div className="grid gap-3 lg:grid-cols-4">
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lead origin</span>
+                <select
+                  value={filters.externalSystem ?? "all"}
+                  onChange={(event) => setManualFilters({ externalSystem: event.target.value })}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                >
+                  <option value="all">All lead origins</option>
+                  <option value="edubh.com">EduBH website</option>
+                </select>
+              </label>
               <label className="block">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Last activity type</span>
                 <select
@@ -1933,7 +2092,8 @@ export function CrmWorkbench({
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Activity state</span><span className="font-medium text-slate-900">{activityStateOptions.find((option) => option.value === (filters.activityState ?? "all"))?.label ?? "All activity states"}</span></div>
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Activity type</span><span className="font-medium text-slate-900">{activityTypeOptions.find((option) => option.value === (filters.activityType ?? "all"))?.label ?? "All activity types"}</span></div>
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Owner</span><span className="font-medium text-slate-900">{ownerOptions.find((option) => option.value === filters.ownerUid)?.label ?? "All owners"}</span></div>
-                  <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Batch</span><span className="font-medium text-slate-900">{filters.importBatchId && filters.importBatchId !== "all" ? filters.importBatchId : "All batches"}</span></div>
+                  <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Batch</span><span className="font-medium text-slate-900">{filters.importBatchId && filters.importBatchId !== "all" ? selectedBatchOption?.label ?? filters.importBatchId : "All batches"}</span></div>
+                  <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Lead origin</span><span className="font-medium text-slate-900">{filters.externalSystem === "edubh.com" ? "EduBH website" : "All lead origins"}</span></div>
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Source</span><span className="font-medium text-slate-900">{filters.source && filters.source !== "all" ? filters.source : "All sources"}</span></div>
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Campaign</span><span className="font-medium text-slate-900">{filters.campaignName && filters.campaignName !== "all" ? filters.campaignName : "All campaigns"}</span></div>
                   <div className="flex items-center justify-between gap-3"><span className="text-slate-500">Tag</span><span className="font-medium text-slate-900">{filters.leadTag && filters.leadTag !== "all" ? filters.leadTag : "All tags"}</span></div>

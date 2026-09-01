@@ -143,9 +143,9 @@ export default function LeadInspector({
         const chunks = chunkUids(allowedOwnerUids, 10);
         const scopedSnapshots = await Promise.all(
           chunks.flatMap((chunk) => [
-            getDocs(query(collection(firestore, 'leads'), where('assignedTo', 'in', chunk), orderBy('updatedAt', 'desc'), limit(ITEMS_PER_PAGE))),
-            getDocs(query(collection(firestore, 'leads'), where('ownerUid', 'in', chunk), orderBy('updatedAt', 'desc'), limit(ITEMS_PER_PAGE))),
-            getDocs(query(collection(firestore, 'leads'), where('closedBy.uid', 'in', chunk), orderBy('updatedAt', 'desc'), limit(ITEMS_PER_PAGE))),
+            getDocs(query(collection(firestore, 'leads'), where('assignedTo', 'in', chunk), limit(ITEMS_PER_PAGE))),
+            getDocs(query(collection(firestore, 'leads'), where('ownerUid', 'in', chunk), limit(ITEMS_PER_PAGE))),
+            getDocs(query(collection(firestore, 'leads'), where('closedBy.uid', 'in', chunk), limit(ITEMS_PER_PAGE))),
           ]),
         );
 

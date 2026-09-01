@@ -20,7 +20,7 @@ import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { CryptoService, EnvelopeMessage } from "@/lib/encryption/CryptoService";
 import { KeyPairManager } from "@/lib/encryption/KeyPairManager";
-import { MessageDoc, MessageType, ChannelDoc } from "./useChat";
+import { MessageDoc, MessageType, ChannelDoc, sortChannelsByUpdatedAt } from "./useChat";
 
 export type EnvelopeMessageDoc = Omit<MessageDoc, 'type'> & {
   type: MessageType;
@@ -140,6 +140,10 @@ export function useEnvelopeChat(channelId: string | null) {
 
   const sendMessage = async (text: string, type: MessageType = 'text') => {
     if (!channelId || !firebaseUser || !db) throw new Error("Not ready");
+
+    // Avoid a login-time initialization race and make sure this user's public
+    // key is available to every participant before building the envelope.
+    await KeyPairManager.getInstance().ensureKeyPairExists(firebaseUser.uid);
     
     // 1. Get Participants
     const cSnap = await getDoc(doc(db, "channels", channelId));
@@ -150,11 +154,30 @@ export function useEnvelopeChat(channelId: string | null) {
     // 2. Encrypt for Everyone (including self)
     const allTargets = Array.from(new Set([...participants, firebaseUser.uid]));
     
-    const envelope = await CryptoService.getInstance().encryptMessage(text, allTargets);
-    const missingRecipients = allTargets.filter((uid) => !envelope.recipientKeys[uid]);
+    const cryptoService = CryptoService.getInstance();
+    let envelope = await cryptoService.encryptMessage(text, allTargets);
+    let missingRecipients = allTargets.filter((uid) => !envelope.recipientKeys[uid]);
+
+    if (missingRecipients.length > 0) {
+      const token = await firebaseUser.getIdToken();
+      const response = await fetch("/api/chat/ensure-recipient-keys", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ channelId, recipientUids: missingRecipients }),
+      });
+
+      if (response.ok) {
+        envelope = await cryptoService.encryptMessage(text, allTargets);
+        missingRecipients = allTargets.filter((uid) => !envelope.recipientKeys[uid]);
+      }
+    }
+
     if (missingRecipients.length > 0) {
       throw new Error(
-        `Cannot send yet. ${missingRecipients.length} participant(s) need to sign in once to initialize secure messaging.`,
+        `Could not initialize secure messaging for ${missingRecipients.length} participant(s). Please try again.`,
       );
     }
 
@@ -245,13 +268,16 @@ export function useSecureChannels() {
         
         const q = query(
             collection(db, "channels"),
-            where("participants", "array-contains", firebaseUser.uid),
-            orderBy("updatedAt", "desc")
+            where("participants", "array-contains", firebaseUser.uid)
         );
 
         const unsub = onSnapshot(q, (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChannelDoc));
-            setChannels(list);
+            setChannels(sortChannelsByUpdatedAt(list));
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching secure channels:", error);
+            setChannels([]);
             setLoading(false);
         });
         return () => unsub();

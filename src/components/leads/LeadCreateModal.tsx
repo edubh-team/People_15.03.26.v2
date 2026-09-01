@@ -141,8 +141,8 @@ export function LeadCreateModal({ isOpen, onClose, onSuccess }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 backdrop-blur-sm sm:p-4">
+      <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)]">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Add lead</h2>
@@ -158,7 +158,8 @@ export function LeadCreateModal({ isOpen, onClose, onSuccess }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm text-slate-700">
               <span className="mb-1 block font-medium">Lead name *</span>
@@ -282,8 +283,9 @@ export function LeadCreateModal({ isOpen, onClose, onSuccess }: Props) {
           </label>
 
           {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4 shadow-[0_-8px_20px_rgba(15,23,42,0.05)]">
             <button
               type="button"
               onClick={resetAndClose}
@@ -305,4 +307,3 @@ export function LeadCreateModal({ isOpen, onClose, onSuccess }: Props) {
     </div>
   );
 }
-

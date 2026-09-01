@@ -183,6 +183,7 @@ export function buildLeadTransferTimeline(input: {
   timelineEvents?: LeadTimelineEvent[] | null;
 }) {
   const merged = new Map<string, LeadTransferRecord>();
+  const transferIds = new Set<string>();
 
   const push = (record: LeadTransferRecord | null | undefined) => {
     if (!record || !toTextOrNull(record.reason)) return;
@@ -210,6 +211,13 @@ export function buildLeadTransferTimeline(input: {
       transferredAt: record.transferredAt ?? new Date(0),
       reason: record.reason.trim(),
     };
+
+    // The same custody transfer is intentionally written to both the lead
+    // document and its timeline. Prefer the first, richer representation when
+    // those copies share an ID, even if server timestamp resolution makes
+    // their semantic keys slightly different.
+    if (transferIds.has(normalized.id)) return;
+    transferIds.add(normalized.id);
     merged.set(transferRecordKey(normalized), normalized);
   };
 

@@ -61,6 +61,15 @@ ZOHO_RECORDING_API_BASE_URL="${ZOHO_RECORDING_API_BASE_URL:-${ZOHO_MEETING_RECOR
 : "${ZOHO_MEETING_CLIENT_SECRET:?Missing Zoho client secret. Set ZOHO_MEETING_CLIENT_SECRET or ZOHO_CLIENT_SECRET in .env.local.}"
 : "${ZOHO_MEETING_REDIRECT_URI:?Missing Zoho redirect URI. Set ZOHO_MEETING_REDIRECT_URI or ZOHO_REDIRECT_URI in .env.local.}"
 
+# Firebase Admin credentials are required by /api/auth/google. Prefer the
+# base64 form because it cannot be damaged by shell quote/newline parsing.
+if [ -z "${FIREBASE_SERVICE_ACCOUNT_KEY_BASE64:-}" ] && \
+   { [ -z "${FIREBASE_CLIENT_EMAIL:-}" ] || [ -z "${FIREBASE_PRIVATE_KEY:-}" ]; }; then
+  echo "Error: Firebase Admin credentials are missing."
+  echo "Set FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 (recommended), or both FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY."
+  exit 1
+fi
+
 if docker image inspect people-hrms:latest >/dev/null 2>&1; then
     echo "Tagging current image as rollback candidate..."
     docker tag people-hrms:latest people-hrms:previous || true
@@ -125,8 +134,9 @@ docker run -d \
   -e SMTP_PASS="$SMTP_PASS" \
   -e SMTP_FROM="$SMTP_FROM" \
   -e FIREBASE_CLIENT_ID="${FIREBASE_CLIENT_ID:-}" \
-  -e FIREBASE_CLIENT_EMAIL="$FIREBASE_CLIENT_EMAIL" \
-  -e FIREBASE_PRIVATE_KEY="$FIREBASE_PRIVATE_KEY" \
+  -e FIREBASE_SERVICE_ACCOUNT_KEY_BASE64="${FIREBASE_SERVICE_ACCOUNT_KEY_BASE64:-}" \
+  -e FIREBASE_CLIENT_EMAIL="${FIREBASE_CLIENT_EMAIL:-}" \
+  -e FIREBASE_PRIVATE_KEY="${FIREBASE_PRIVATE_KEY:-}" \
   -e ZOHO_MEETING_CLIENT_ID="$ZOHO_MEETING_CLIENT_ID" \
   -e ZOHO_MEETING_CLIENT_SECRET="$ZOHO_MEETING_CLIENT_SECRET" \
   -e ZOHO_MEETING_REDIRECT_URI="$ZOHO_MEETING_REDIRECT_URI" \

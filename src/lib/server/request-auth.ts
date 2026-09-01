@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import type { Auth, DecodedIdToken } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
-import { canAccessFinance, canCreateUsers, canManageTeam, isAdminUser, isHrUser } from "@/lib/access";
+import {
+  canAccessFinance,
+  canCreateUsers,
+  canManageTeam,
+  isAdminUser,
+  isHrUser,
+} from "@/lib/access";
 import { getAdmin } from "@/lib/firebase/admin";
 import { readCookieValue } from "@/lib/session";
 import { decodeSessionCookieValue } from "@/lib/server/session";

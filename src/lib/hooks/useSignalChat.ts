@@ -20,7 +20,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { SignalManager } from "@/lib/signal/SignalManager";
-import { MessageDoc, MessageType, ChannelDoc } from "./useChat";
+import { MessageDoc, MessageType, ChannelDoc, sortChannelsByUpdatedAt } from "./useChat";
 
 export type SignalMessageDoc = Omit<MessageDoc, 'type'> & {
   type: number | MessageType; // Allow both Signal types (number) and standard types
@@ -260,15 +260,18 @@ export function useSignalChannels() {
         
         const q = query(
             collection(db, "channels"),
-            where("participants", "array-contains", firebaseUser.uid),
-            orderBy("updatedAt", "desc")
+            where("participants", "array-contains", firebaseUser.uid)
         );
 
         const unsub = onSnapshot(q, (snap) => {
             const list = snap.docs
               .map((d) => ({ id: d.id, ...d.data() } as ChannelDoc))
               .filter((channel) => !(channel.archivedBy ?? []).includes(firebaseUser.uid));
-            setChannels(list);
+            setChannels(sortChannelsByUpdatedAt(list));
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching secure channels:", error);
+            setChannels([]);
             setLoading(false);
         });
         return () => unsub();

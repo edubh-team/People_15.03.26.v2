@@ -1,6 +1,7 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { db } from '@/lib/firebase/client';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { importPublicKey } from '@/lib/crypto';
 
 interface SecureChatDB extends DBSchema {
   keys: {
@@ -222,29 +223,35 @@ export class KeyPairManager {
     if (!db) throw new Error("Firestore not initialized");
     const snap = await getDoc(doc(db, "users", userId));
     const data = snap.exists() ? snap.data() : null;
-    const rawPublicKey = data?.publicKey ?? data?.keys?.publicKey ?? null;
-    if (!rawPublicKey) {
+    const candidates = [data?.publicKey, data?.keys?.publicKey].filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    );
+    if (candidates.length === 0) {
       console.warn(`User ${userId} has no public key.`);
       return null;
     }
 
-    try {
-      const jwk = JSON.parse(rawPublicKey);
-      const key = await window.crypto.subtle.importKey(
-        "jwk",
-        jwk,
-        {
-          name: "RSA-OAEP",
-          hash: "SHA-256"
-        },
-        true,
-        ["encrypt"]
-      );
-      this.publicKeyCache.set(userId, key);
-      return key;
-    } catch (e) {
-      console.error(`Failed to import public key for ${userId}`, e);
-      return null;
+    for (const rawPublicKey of candidates) {
+      try {
+        const trimmedKey = rawPublicKey.trim();
+        const key = trimmedKey.startsWith("{")
+          ? await window.crypto.subtle.importKey(
+              "jwk",
+              JSON.parse(trimmedKey),
+              { name: "RSA-OAEP", hash: "SHA-256" },
+              true,
+              ["encrypt"],
+            )
+          : await importPublicKey(trimmedKey);
+
+        this.publicKeyCache.set(userId, key);
+        return key;
+      } catch (error) {
+        console.warn(`Unable to import one public-key format for ${userId}.`, error);
+      }
     }
+
+    console.error(`Failed to import every available public key for ${userId}.`);
+    return null;
   }
 }
